@@ -1,0 +1,19 @@
+fib :: (n) {
+    if n == 1 {
+        return 1;
+    }
+    a := 0;
+    b := 0;
+    c := 1;
+    i := 1;
+    loop {
+        a = b + c;
+        b = c;
+        c = a;
+        i = i + 1;
+        if i == n {
+            break;
+        }
+    }
+    return a;
+}
