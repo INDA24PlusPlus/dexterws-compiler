@@ -6,12 +6,13 @@ pub struct Lexer<'a> {
     column: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SymbolKind {
     Plus,
     Minus,
     Star,
     Slash,
+    Percent,
     Walrus,
     AssignEq,
     ColonColon,
@@ -41,6 +42,7 @@ impl SymbolKind {
             "-" => Some(Self::Minus),
             "*" => Some(Self::Star),
             "/" => Some(Self::Slash),
+            "%" => Some(Self::Percent),
             ":=" => Some(Self::Walrus),
             "::" => Some(Self::ColonColon),
             "=" => Some(Self::AssignEq),
@@ -64,20 +66,20 @@ impl SymbolKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     Number(f64),
     Ident(String),
     Symbol(SymbolKind),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TokenLocation {
     pub line_span: (u32, u32), 
     pub col_span: (u32, u32),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
     pub location: TokenLocation,
@@ -169,7 +171,7 @@ impl<'a> Lexer<'a> {
             }
             match c {
                 ':' | '=' | '!' | '<' | '>' | '&' | '|' => (),
-                '+' | '-' | '*' | '/' | '(' | ')' | ';' | '{' | '}' | ',' => {
+                '+' | '-' | '*' | '/' | '(' | ')' | ';' | '{' | '}' | ',' | '%' => {
                     should_break = true;
                 }
                 _ => return true,
