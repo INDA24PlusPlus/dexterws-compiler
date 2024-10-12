@@ -18,7 +18,7 @@ jobs:
     runs-on: windows-latest
     env:
       toolchain-version: 1.67.0
-      llvm-version: "17"
+      llvm-version: "18"
     steps:
 
       - uses: actions/checkout@v3
