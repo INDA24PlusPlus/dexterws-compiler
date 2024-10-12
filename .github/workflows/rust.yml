@@ -31,7 +31,6 @@ jobs:
       - name: Install LLVM
         uses: KyleMayes/install-llvm-action@latest
         with:
-          version: ${{ env.llvm-version }}
           directory: "./llvm"
 
       - name: Release Build
