@@ -29,7 +29,7 @@ jobs:
           toolchain: ${{ env.toolchain-version }}
 
       - name: Install LLVM
-        uses: BlueKossa/install-llvm-action@v2
+        uses: BlueKossa/install-llvm-action@master
         with:
           version: ${{ env.llvm-version }}
           directory: "./llvm"
