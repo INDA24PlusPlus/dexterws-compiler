@@ -41,7 +41,7 @@ jobs:
           args: --release
 
       - name: Rename file
-        run: mv target/release/dexterws-compiler.exe ./compiler.exe
+        run: mv target/release/*.exe ./compiler.exe
         
       
       - uses: actions/upload-artifact@master
