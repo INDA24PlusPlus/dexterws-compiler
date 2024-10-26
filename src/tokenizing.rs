@@ -13,6 +13,7 @@ pub enum SymbolKind {
     Star,
     Slash,
     Percent,
+    At,
     Walrus,
     AssignEq,
     ColonColon,
@@ -33,6 +34,8 @@ pub enum SymbolKind {
     LBrace,
     RBrace,
     Comma,
+    RArrow,
+    Colon,
 }
 
 impl SymbolKind {
@@ -43,6 +46,7 @@ impl SymbolKind {
             "*" => Some(Self::Star),
             "/" => Some(Self::Slash),
             "%" => Some(Self::Percent),
+            "@" => Some(Self::At),
             ":=" => Some(Self::Walrus),
             "::" => Some(Self::ColonColon),
             "=" => Some(Self::AssignEq),
@@ -61,19 +65,27 @@ impl SymbolKind {
             "{" => Some(Self::LBrace),
             "}" => Some(Self::RBrace),
             "," => Some(Self::Comma),
+            "->" => Some(Self::RArrow),
+            ":" => Some(Self::Colon),
             _ => None,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum NumberKind {
+    Int(i64),
+    Float(f64),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
-    Number(f64),
+    Number(NumberKind),
     Ident(String),
     Symbol(SymbolKind),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct TokenLocation {
     pub line_span: (u32, u32), 
     pub col_span: (u32, u32),
@@ -143,9 +155,13 @@ impl<'a> Lexer<'a> {
             }
             !c.is_ascii_digit()
         });
-        let value = value.parse().unwrap();
+        let number = if seen_dot {
+            NumberKind::Float(value.parse().unwrap())
+        } else {
+            NumberKind::Int(value.parse().unwrap())
+        };
         Token {
-            kind: TokenKind::Number(value),
+            kind: TokenKind::Number(number),
             location: loc,
         }
     }
@@ -170,8 +186,8 @@ impl<'a> Lexer<'a> {
                 return true;
             }
             match c {
-                ':' | '=' | '!' | '<' | '>' | '&' | '|' => (),
-                '+' | '-' | '*' | '/' | '(' | ')' | ';' | '{' | '}' | ',' | '%' => {
+                ':' | '=' | '!' | '<' | '>' | '&' | '|' | '-' => (),
+                '+' | '*' | '/' | '(' | ')' | ';' | '{' | '}' | ',' | '%' | '@' => {
                     should_break = true;
                 }
                 _ => return true,
