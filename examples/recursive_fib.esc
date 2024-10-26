@@ -1,0 +1,12 @@
+fib :: (n: int) -> int {
+    if n <= 1 {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+main :: () -> int {
+    result := fib(30);
+    iprint(result);
+    return 0;
+}
