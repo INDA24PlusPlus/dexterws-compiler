@@ -2,8 +2,8 @@ use std::{collections::HashMap, path::Path};
 
 use crate::{
     parsing::{
-        Assignment, BinOp, BinOpKind, Block, Expr, ExprKind, Identifier, LiteralKind,
-        Statement, StatementKind, Type, UnaryOpKind,
+        Assignment, BinOp, BinOpKind, Block, Expr, ExprKind, Identifier, LiteralKind, Statement,
+        StatementKind, Type, UnaryOpKind,
     },
     semantical::{ExtendedFunction, Module},
 };
@@ -199,8 +199,7 @@ impl<'a> CodeGen<'a> {
         &mut self,
         block: &Block,
         basic_block: inkwell::basic_block::BasicBlock<'a>,
-    ) -> bool
-    {
+    ) -> bool {
         self.llvm_builder.position_at_end(basic_block);
         let mut exited_early = false;
         for statement in block.stmts.iter() {
@@ -230,7 +229,9 @@ impl<'a> CodeGen<'a> {
             StatementKind::Break => {
                 let current_block = self.llvm_builder.get_insert_block().unwrap();
                 let end_block = self.loop_exits.last().unwrap();
-                self.llvm_builder.build_unconditional_branch(*end_block).unwrap();
+                self.llvm_builder
+                    .build_unconditional_branch(*end_block)
+                    .unwrap();
                 self.llvm_builder.position_at_end(current_block);
                 return true;
             }
@@ -531,7 +532,9 @@ impl<'a> CodeGen<'a> {
         let then_block = self.context.append_basic_block(function, "if_then");
         let exited_early = self.generate_block(then, then_block);
         if !exited_early {
-            self.llvm_builder.build_unconditional_branch(then_block).unwrap();
+            self.llvm_builder
+                .build_unconditional_branch(then_block)
+                .unwrap();
         }
         let end_block = self.context.append_basic_block(function, "if_end");
         if let Some(or) = or {
@@ -539,19 +542,20 @@ impl<'a> CodeGen<'a> {
             let exited_early = self.generate_block(or, or_block);
             println!("exited_early: {}", exited_early);
             if !exited_early {
-                self.llvm_builder.build_unconditional_branch(end_block).unwrap();
+                self.llvm_builder
+                    .build_unconditional_branch(end_block)
+                    .unwrap();
             }
             self.llvm_builder.position_at_end(current_block);
             self.llvm_builder
-                .build_conditional_branch(cond.into_int_value(), then_block, or_block).unwrap();
+                .build_conditional_branch(cond.into_int_value(), then_block, or_block)
+                .unwrap();
             self.llvm_builder.position_at_end(or_block);
         } else {
             self.llvm_builder.position_at_end(current_block);
-            self.llvm_builder.build_conditional_branch(
-                cond.into_int_value(),
-                then_block,
-                end_block,
-            ).unwrap();
+            self.llvm_builder
+                .build_conditional_branch(cond.into_int_value(), then_block, end_block)
+                .unwrap();
         }
         self.llvm_builder.position_at_end(end_block);
     }
@@ -560,11 +564,15 @@ impl<'a> CodeGen<'a> {
         let current_block = self.llvm_builder.get_insert_block().unwrap();
         let function = current_block.get_parent().unwrap();
         let loop_block = self.context.append_basic_block(function, "loop_block");
-        self.llvm_builder.build_unconditional_branch(loop_block).unwrap();
+        self.llvm_builder
+            .build_unconditional_branch(loop_block)
+            .unwrap();
         let end_block = self.context.append_basic_block(function, "loop_exit");
         self.loop_exits.push(end_block);
         self.generate_block(body, loop_block);
-        self.llvm_builder.build_unconditional_branch(loop_block).unwrap();
+        self.llvm_builder
+            .build_unconditional_branch(loop_block)
+            .unwrap();
         self.llvm_builder.position_at_end(end_block);
         self.loop_exits.pop();
     }

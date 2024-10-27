@@ -87,7 +87,7 @@ pub enum TokenKind {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct TokenLocation {
-    pub line_span: (u32, u32), 
+    pub line_span: (u32, u32),
     pub col_span: (u32, u32),
 }
 
@@ -136,7 +136,13 @@ impl<'a> Lexer<'a> {
             self.eat();
         }
         let end = (self.line, self.column);
-        (value, TokenLocation { line_span: (start.0, end.0), col_span: (start.1, end.1) })
+        (
+            value,
+            TokenLocation {
+                line_span: (start.0, end.0),
+                col_span: (start.1, end.1),
+            },
+        )
     }
 
     pub fn eat_whitespace(&mut self) {

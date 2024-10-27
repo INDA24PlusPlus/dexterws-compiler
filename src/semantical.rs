@@ -3,8 +3,10 @@ use std::collections::HashMap;
 use crate::{
     chainmap::ChainMap,
     parsing::{
-        self, Assignment, Ast, BinOp, BinOpKind, Block, Expr, ExprKind, Function, FunctionSignature, Identifier, ItemKind, LiteralKind, NodeSpan, Statement, StatementKind, Type, UnaryOpKind
-    }, tokenizing::TokenLocation,
+        self, Assignment, Ast, BinOpKind, Block, Expr, ExprKind, Function, FunctionSignature,
+        Identifier, ItemKind, LiteralKind, NodeSpan, Statement, StatementKind, Type, UnaryOpKind,
+    },
+    tokenizing::TokenLocation,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,17 +113,32 @@ impl SemanticError {
         };
 
         let error_text = match &self {
-            SemanticError::ExpressionTypeMismatch { expected, found, .. } => {
-                format!("invalid expression type, expected {}, found {}", expected, found)
+            SemanticError::ExpressionTypeMismatch {
+                expected, found, ..
+            } => {
+                format!(
+                    "invalid expression type, expected {}, found {}",
+                    expected, found
+                )
             }
             SemanticError::FunctionNotFound { name, .. } => {
                 format!("function '{}' is not defined", name)
             }
-            SemanticError::ArgumentCountMismatch { expected, found, .. } => {
-                format!("invalid argument count, expected {} arguments, found {}", expected, found)
+            SemanticError::ArgumentCountMismatch {
+                expected, found, ..
+            } => {
+                format!(
+                    "invalid argument count, expected {} arguments, found {}",
+                    expected, found
+                )
             }
-            SemanticError::ArgumentTypeMismatch { expected, found, .. } => {
-                format!("invalid argument type, expected {}, found {}", expected, found)
+            SemanticError::ArgumentTypeMismatch {
+                expected, found, ..
+            } => {
+                format!(
+                    "invalid argument type, expected {}, found {}",
+                    expected, found
+                )
             }
             SemanticError::BreakOutsideOfLoop { .. } => "cannot break outside of loop".to_string(),
             SemanticError::DoubleVariableDeclaration { name, .. } => {
@@ -133,9 +150,16 @@ impl SemanticError {
             SemanticError::VariableNotFound { name, .. } => {
                 format!("variable '{}' is not defined", name.value)
             }
-            SemanticError::ReturnOutsideOfFunction { .. } => "cannot return outside of function".to_string(),
-            SemanticError::ReturnTypeMismatch { expected, found, .. } => {
-                format!("invalid return type, expected {}, found {}", expected, found)
+            SemanticError::ReturnOutsideOfFunction { .. } => {
+                "cannot return outside of function".to_string()
+            }
+            SemanticError::ReturnTypeMismatch {
+                expected, found, ..
+            } => {
+                format!(
+                    "invalid return type, expected {}, found {}",
+                    expected, found
+                )
             }
             SemanticError::UnsupportedBinOp { ty, .. } => {
                 format!("unsupported binary operation for type {}", ty)
@@ -155,7 +179,11 @@ impl SemanticError {
             let line_num = idx + 1;
             let line_num_str = line_num.to_string();
             let padding = max_line_num_len - line_num_str.len();
-            string.push_str(&format!(" \x1b[34m{}{} | \x1b[0m", " ".repeat(padding), line_num_str));
+            string.push_str(&format!(
+                " \x1b[34m{}{} | \x1b[0m",
+                " ".repeat(padding),
+                line_num_str
+            ));
             string.push_str(line);
             string.push('\n');
         }
@@ -182,10 +210,17 @@ impl SemanticError {
             for _ in col_start..col_end {
                 caret.push('^');
             }
-            string.push_str(&format!(" \x1b[34m{}{} | \x1b[0m", " ".repeat(padding), line_num_str));
+            string.push_str(&format!(
+                " \x1b[34m{}{} | \x1b[0m",
+                " ".repeat(padding),
+                line_num_str
+            ));
             string.push_str(line);
             string.push('\n');
-            string.push_str(&format!(" \x1b[34m{} | \x1b[0m", " ".repeat(max_line_num_len)));
+            string.push_str(&format!(
+                " \x1b[34m{} | \x1b[0m",
+                " ".repeat(max_line_num_len)
+            ));
             string.push_str(&format!("\x1b[31m{}\x1b[0m\n", caret));
         }
 
@@ -194,12 +229,14 @@ impl SemanticError {
             let line_num = post_last_line + 1;
             let line_num_str = line_num.to_string();
             let padding = max_line_num_len - line_num_str.len();
-            string.push_str(&format!(" \x1b[34m{}{} | \x1b[0m", " ".repeat(padding), line_num_str));
+            string.push_str(&format!(
+                " \x1b[34m{}{} | \x1b[0m",
+                " ".repeat(padding),
+                line_num_str
+            ));
             string.push_str(line);
             string.push('\n');
         }
-
-
 
         string
     }
@@ -224,7 +261,7 @@ impl SemanticAnalyzer {
             functions: vec![],
             structs: (),
         };
-        
+
         self.declare_builtins();
         self.declare_functions(&ast)?;
 
@@ -237,7 +274,7 @@ impl SemanticAnalyzer {
             }
         }
 
-        return Ok(module);
+        Ok(module)
     }
 
     fn declare_builtins(&mut self) {
@@ -246,8 +283,14 @@ impl SemanticAnalyzer {
                 name: Identifier {
                     value: name.to_string(),
                     span: NodeSpan {
-                        start: TokenLocation { line_span: (0, 0), col_span: (0, 0) },
-                        end: TokenLocation { line_span: (0, 0), col_span: (0, 0) },
+                        start: TokenLocation {
+                            line_span: (0, 0),
+                            col_span: (0, 0),
+                        },
+                        end: TokenLocation {
+                            line_span: (0, 0),
+                            col_span: (0, 0),
+                        },
                     },
                 },
                 args: vec![("arg".to_string(), *arg_ty)],
@@ -317,7 +360,10 @@ impl SemanticAnalyzer {
                 }
                 return Ok(true);
             }
-            StatementKind::Return(_) => {self.analyze_return(stmt)?; return Ok(true);},
+            StatementKind::Return(_) => {
+                self.analyze_return(stmt)?;
+                return Ok(true);
+            }
         }
         Ok(false)
     }

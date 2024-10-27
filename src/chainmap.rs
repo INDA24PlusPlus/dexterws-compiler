@@ -1,19 +1,16 @@
 use std::{collections::HashMap, hash::Hash};
 
-
 #[derive(Debug)]
 pub struct ChainMap<K: Eq + Hash, V> {
     maps: Vec<HashMap<K, V>>,
 }
 
-impl<K, V> ChainMap<K, V> 
-where 
-    K: Eq + Hash 
+impl<K, V> ChainMap<K, V>
+where
+    K: Eq + Hash,
 {
     pub fn new() -> ChainMap<K, V> {
-        ChainMap {
-            maps: vec![],
-        }
+        ChainMap { maps: vec![] }
     }
 
     pub fn insert(&mut self, key: K, value: V) -> Option<()> {

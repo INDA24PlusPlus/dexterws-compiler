@@ -6,8 +6,14 @@ fn unexpected_token(file: &str, token: Token) {
     let lines = file.lines().collect::<Vec<_>>();
     let line_num = line_pos + 1;
     let col_num = col_pos + 1;
-    eprintln!("\x1b[31merror\x1b[0m: unexpected token at {}:{}", line_num, col_num);
-    let line_nums = [line_num - 1, line_num, line_num + 1].iter().map(|n| n.to_string()).collect::<Vec<_>>();
+    eprintln!(
+        "\x1b[31merror\x1b[0m: unexpected token at {}:{}",
+        line_num, col_num
+    );
+    let line_nums = [line_num - 1, line_num, line_num + 1]
+        .iter()
+        .map(|n| n.to_string())
+        .collect::<Vec<_>>();
     let max_len = line_nums.iter().map(|s| s.len()).max().unwrap();
     let padding = max_len - line_nums[0].len();
     let idx = (line_pos as usize).checked_sub(1);
@@ -68,6 +74,4 @@ fn main() {
     codegen.spit_out();
     codegen.verify();
     codegen.spit_out_object(file_name);
-
-
 }
