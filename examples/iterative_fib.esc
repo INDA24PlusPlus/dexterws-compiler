@@ -1,0 +1,23 @@
+fib :: (n: int) -> int {
+    a := 0;
+    b := 0;
+    c := 1;
+    counter := 1;
+    loop {
+        counter = counter + 1;
+        if counter > n {
+            break;
+            iprint(n);
+        }
+        a = b;
+        b = c;
+        c = a + b;
+    }
+    return c;
+}
+
+main :: () -> int {
+    result := fib(230);
+    iprint(result);
+    return 0;
+}
