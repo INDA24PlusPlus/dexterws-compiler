@@ -53,11 +53,20 @@ fn main() {
     let ast = parser.parse().unwrap();
     let mut semantical = dexterws_compiler::semantical::SemanticAnalyzer::new();
     let file_name = path.file_name().unwrap().to_str().unwrap();
-    let semantical = semantical.analyze_ast(ast, file_name).unwrap();
+    let semantical_result = semantical.analyze_ast(ast, file_name);
+    let new_ast = match semantical_result {
+        Ok(ast) => ast,
+        Err(err) => {
+            println!("{}", err.to_string(&file));
+            return;
+        }
+    };
     let llvm_context = inkwell::context::Context::create();
     let llvm_module = llvm_context.create_module("main");
     let mut codegen = dexterws_compiler::codegen::CodeGen::new(&llvm_context, llvm_module);
-    codegen.generate(semantical);
+    codegen.generate(new_ast);
+    codegen.spit_out();
+    codegen.verify();
     codegen.spit_out_object(file_name);
 
 

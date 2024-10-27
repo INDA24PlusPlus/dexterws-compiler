@@ -1,9 +1,8 @@
 use std::{collections::HashMap, path::Path};
 
 use crate::{
-    chainmap::ChainMap,
     parsing::{
-        Assignment, Ast, BinOp, BinOpKind, Block, Expr, ExprKind, Identifier, LiteralKind,
+        Assignment, BinOp, BinOpKind, Block, Expr, ExprKind, Identifier, LiteralKind,
         Statement, StatementKind, Type, UnaryOpKind,
     },
     semantical::{ExtendedFunction, Module},
@@ -13,8 +12,8 @@ use inkwell::{
     context::Context as LLVMContext,
     module::Module as LLVMModule,
     targets::{CodeModel, RelocMode, Target, TargetMachine},
-    types::{BasicType, BasicTypeEnum, PointerType},
-    values::{BasicValueEnum, FunctionValue, PointerValue},
+    types::{BasicType, BasicTypeEnum},
+    values::PointerValue,
     AddressSpace, OptimizationLevel,
 };
 
@@ -23,15 +22,16 @@ pub struct CodeGen<'a> {
     llvm_module: LLVMModule<'a>,
     llvm_builder: LLVMBuilder<'a>,
     variables: HashMap<String, (PointerValue<'a>, BasicTypeEnum<'a>)>,
+    loop_exits: Vec<inkwell::basic_block::BasicBlock<'a>>,
 }
 
 impl Type {
-    fn to_llvm<'a>(&self, context: &'a LLVMContext) -> inkwell::types::BasicTypeEnum<'a> {
+    fn to_llvm(self, context: &LLVMContext) -> inkwell::types::BasicTypeEnum {
         match self {
-            Type::Int => context.i32_type().as_basic_type_enum(),
+            Type::Int => context.i64_type().as_basic_type_enum(),
             Type::Float => context.f64_type().as_basic_type_enum(),
             Type::Bool => context.bool_type().as_basic_type_enum(),
-            Type::Void => context.i32_type().as_basic_type_enum(),
+            Type::Void => context.i64_type().as_basic_type_enum(),
         }
     }
 }
@@ -44,11 +44,17 @@ impl<'a> CodeGen<'a> {
             llvm_module,
             llvm_builder,
             variables: HashMap::new(),
+            loop_exits: vec![],
         }
     }
 
     pub fn spit_out(&self) {
         self.llvm_module.print_to_stderr();
+    }
+
+    pub fn verify(&self) {
+        let verify = self.llvm_module.verify();
+        println!("{:?}", verify);
     }
 
     pub fn spit_out_object(&self, file_name: &str) {
@@ -99,7 +105,7 @@ impl<'a> CodeGen<'a> {
             for arg in function.inner.sig.args.iter() {
                 args.push(arg.1.to_llvm(self.context).into());
             }
-            let function_type = self.context.i32_type().fn_type(&args, false);
+            let function_type = self.context.i64_type().fn_type(&args, false);
             self.llvm_module
                 .add_function(&function.inner.sig.name.value, function_type, None);
         }
@@ -114,20 +120,20 @@ impl<'a> CodeGen<'a> {
 
     pub fn generate_printf(&mut self) {
         let string_type = self.context.ptr_type(AddressSpace::default());
-        let function_type = self.context.i32_type().fn_type(&[string_type.into()], true);
+        let function_type = self.context.i64_type().fn_type(&[string_type.into()], true);
         let _printf = self.llvm_module.add_function("printf", function_type, None);
     }
 
     pub fn generate_iprint(&mut self) {
         let printf = self.llvm_module.get_function("printf").unwrap();
         let int_type = Type::Int.to_llvm(self.context);
-        let iprint_type = self.context.i32_type().fn_type(&[int_type.into()], false);
+        let iprint_type = self.context.i64_type().fn_type(&[int_type.into()], false);
         let iprint = self.llvm_module.add_function("iprint", iprint_type, None);
         let basic_block = self.context.append_basic_block(iprint, "entry");
         self.llvm_builder.position_at_end(basic_block);
         let fmt = self
             .llvm_builder
-            .build_global_string_ptr("%d\n", "fmt_iprint")
+            .build_global_string_ptr("%lld\n", "fmt_iprint")
             .unwrap();
         let arg = iprint.get_first_param().unwrap();
         let call = self
@@ -141,7 +147,7 @@ impl<'a> CodeGen<'a> {
     pub fn generate_fprint(&mut self) {
         let printf = self.llvm_module.get_function("printf").unwrap();
         let float_type = Type::Float.to_llvm(self.context);
-        let fprint_type = self.context.i32_type().fn_type(&[float_type.into()], false);
+        let fprint_type = self.context.i64_type().fn_type(&[float_type.into()], false);
         let fprint = self.llvm_module.add_function("fprint", fprint_type, None);
         let basic_block = self.context.append_basic_block(fprint, "entry");
         self.llvm_builder.position_at_end(basic_block);
@@ -171,9 +177,9 @@ impl<'a> CodeGen<'a> {
                 .llvm_builder
                 .build_alloca(arg.get_type(), arg_name)
                 .unwrap();
-            self.llvm_builder.build_store(alloca, arg);
+            self.llvm_builder.build_store(alloca, arg).unwrap();
             self.variables
-                .insert(arg_name.to_string(), (alloca, arg.get_type().into()));
+                .insert(arg_name.to_string(), (alloca, arg.get_type()));
         }
         for variable in function.variables.iter() {
             let var_type = variable.ty.to_llvm(self.context);
@@ -192,26 +198,27 @@ impl<'a> CodeGen<'a> {
     pub fn generate_block(
         &mut self,
         block: &Block,
-        function: FunctionValue<'a>,
-        name: &str,
-    ) -> inkwell::basic_block::BasicBlock<'a> {
-        let basic_block = self.context.append_basic_block(function, name);
+        basic_block: inkwell::basic_block::BasicBlock<'a>,
+    ) -> bool
+    {
         self.llvm_builder.position_at_end(basic_block);
+        let mut exited_early = false;
         for statement in block.stmts.iter() {
-            self.generate_statement(statement);
+            exited_early = self.generate_statement(statement);
         }
-        basic_block
+        exited_early
     }
 
-    pub fn generate_statement(&mut self, statement: &Statement) {
+    pub fn generate_statement(&mut self, statement: &Statement) -> bool {
         match &statement.kind {
             StatementKind::Return(expr) => {
                 let value = if let Some(expr) = expr {
                     self.generate_expr(expr)
                 } else {
-                    self.context.i32_type().const_int(0, false).into()
+                    self.context.i64_type().const_int(0, false).into()
                 };
                 self.llvm_builder.build_return(Some(&value)).unwrap();
+                return true;
             }
             StatementKind::Expr(expr) => {
                 self.generate_expr(expr);
@@ -219,9 +226,16 @@ impl<'a> CodeGen<'a> {
             StatementKind::Decl(assignment) => self.generate_assignment(assignment),
             StatementKind::Assign(assignment) => self.generate_assignment(assignment),
             StatementKind::If { cond, then, or } => self.generate_if(cond, then, or),
-            StatementKind::Loop { body } => todo!(),
-            StatementKind::Break => todo!(),
+            StatementKind::Loop { body } => self.generate_loop(body),
+            StatementKind::Break => {
+                let current_block = self.llvm_builder.get_insert_block().unwrap();
+                let end_block = self.loop_exits.last().unwrap();
+                self.llvm_builder.build_unconditional_branch(*end_block).unwrap();
+                self.llvm_builder.position_at_end(current_block);
+                return true;
+            }
         }
+        false
     }
 
     pub fn generate_expr(&mut self, expr: &Expr) -> inkwell::values::BasicValueEnum<'a> {
@@ -236,7 +250,7 @@ impl<'a> CodeGen<'a> {
 
     pub fn generate_literal(&mut self, lit: &LiteralKind) -> inkwell::values::BasicValueEnum<'a> {
         match lit {
-            LiteralKind::Int(i) => self.context.i32_type().const_int(*i as u64, false).into(),
+            LiteralKind::Int(i) => self.context.i64_type().const_int(*i as u64, false).into(),
             LiteralKind::Float(f) => self.context.f64_type().const_float(*f).into(),
             LiteralKind::Bool(b) => self.context.bool_type().const_int(*b as u64, false).into(),
         }
@@ -475,7 +489,7 @@ impl<'a> CodeGen<'a> {
                     .llvm_builder
                     .build_float_to_signed_int(
                         value.into_float_value(),
-                        self.context.i32_type(),
+                        self.context.i64_type(),
                         "cast",
                     )
                     .unwrap()
@@ -514,25 +528,44 @@ impl<'a> CodeGen<'a> {
         let cond = self.generate_expr(cond);
         let current_block = self.llvm_builder.get_insert_block().unwrap();
         let function = current_block.get_parent().unwrap();
-        let then_block = self.generate_block(then, function, "then");
-        let end_block = self.context.append_basic_block(function, "end");
-        self.llvm_builder.position_at_end(then_block);
-        self.llvm_builder.build_unconditional_branch(end_block);
+        let then_block = self.context.append_basic_block(function, "if_then");
+        let exited_early = self.generate_block(then, then_block);
+        if !exited_early {
+            self.llvm_builder.build_unconditional_branch(then_block).unwrap();
+        }
+        let end_block = self.context.append_basic_block(function, "if_end");
         if let Some(or) = or {
-            let or_block = self.generate_block(or, function, "or");
+            let or_block = self.context.append_basic_block(function, "if_or");
+            let exited_early = self.generate_block(or, or_block);
+            println!("exited_early: {}", exited_early);
+            if !exited_early {
+                self.llvm_builder.build_unconditional_branch(end_block).unwrap();
+            }
             self.llvm_builder.position_at_end(current_block);
             self.llvm_builder
-                .build_conditional_branch(cond.into_int_value(), then_block, or_block);
+                .build_conditional_branch(cond.into_int_value(), then_block, or_block).unwrap();
             self.llvm_builder.position_at_end(or_block);
-            self.llvm_builder.build_unconditional_branch(end_block);
         } else {
             self.llvm_builder.position_at_end(current_block);
             self.llvm_builder.build_conditional_branch(
                 cond.into_int_value(),
                 then_block,
                 end_block,
-            );
+            ).unwrap();
         }
         self.llvm_builder.position_at_end(end_block);
+    }
+
+    fn generate_loop(&mut self, body: &Block) {
+        let current_block = self.llvm_builder.get_insert_block().unwrap();
+        let function = current_block.get_parent().unwrap();
+        let loop_block = self.context.append_basic_block(function, "loop_block");
+        self.llvm_builder.build_unconditional_branch(loop_block).unwrap();
+        let end_block = self.context.append_basic_block(function, "loop_exit");
+        self.loop_exits.push(end_block);
+        self.generate_block(body, loop_block);
+        self.llvm_builder.build_unconditional_branch(loop_block).unwrap();
+        self.llvm_builder.position_at_end(end_block);
+        self.loop_exits.pop();
     }
 }

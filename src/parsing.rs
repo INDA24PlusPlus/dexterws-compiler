@@ -44,6 +44,18 @@ pub enum Type {
     Void,
 }
 
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let s = match self {
+            Type::Int => "int",
+            Type::Float => "float",
+            Type::Bool => "bool",
+            Type::Void => "void",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[derive(Debug)]
 pub struct Ast {
     pub nodes: Vec<Item>,
