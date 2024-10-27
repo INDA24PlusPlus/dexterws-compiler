@@ -29,4 +29,6 @@ fn main() {
     codegen.spit_out();
     codegen.verify();
     codegen.spit_out_object(file_name);
+    let tst_path = std::path::Path::new("./test");
+    println!("{}", tst_path.display());
 }

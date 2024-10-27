@@ -215,7 +215,7 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn eat_ident(&mut self) -> Token {
-        let (value, loc) = self.eat_until(|c| !c.is_ascii_alphanumeric());
+        let (value, loc) = self.eat_until(|c| (!c.is_ascii_alphanumeric() && c != '_'));
         Token {
             kind: TokenKind::Ident(value),
             location: loc,

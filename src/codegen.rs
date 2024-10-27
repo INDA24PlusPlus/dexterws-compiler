@@ -109,7 +109,8 @@ impl<'a> CodeGen<'a> {
             for arg in function.inner.sig.args.iter() {
                 args.push(arg.1.to_llvm(self.context).into());
             }
-            let function_type = self.context.i64_type().fn_type(&args, false);
+            let ret_ty = function.inner.sig.ret_ty.to_llvm(self.context);
+            let function_type = ret_ty.fn_type(&args, false);
             self.llvm_module
                 .add_function(&function.inner.sig.name.value, function_type, None);
         }

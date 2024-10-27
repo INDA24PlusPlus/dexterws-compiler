@@ -66,6 +66,7 @@ pub struct Ast {
 #[derive(Debug)]
 pub enum ItemKind {
     Function(Function),
+    Import(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -388,11 +389,15 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                 if ident == "true" || ident == "false" {
                     ExprKind::Literal(LiteralKind::Bool(ident == "true"))
                 } else if let TokenKind::Symbol(SymbolKind::LParen) = self.peek()?.kind {
+                    let _ = self.eat()?;
                     let mut args = Vec::new();
                     loop {
-                        let token = self.eat()?;
+                        let token = self.peek()?;
                         match token.kind {
-                            TokenKind::Symbol(SymbolKind::RParen) => break,
+                            TokenKind::Symbol(SymbolKind::RParen) => {
+                                let _ = self.eat()?;
+                                break;
+                            }
                             _ => {
                                 let expr = self.parse_expr(0)?;
                                 args.push(expr);
@@ -618,6 +623,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                 "int" => Ok(Type::Int),
                 "float" => Ok(Type::Float),
                 "bool" => Ok(Type::Bool),
+                "string" => Ok(Type::String),
                 _ => Err(ParsingError::UnexpectedToken(token)),
             },
             _ => Err(ParsingError::UnexpectedToken(token)),
@@ -627,7 +633,15 @@ impl<I: Iterator<Item = Token>> Parser<I> {
     pub fn parse_item_kind(&mut self) -> ParsingResult<ItemKind> {
         let token_kind = self.peek()?.kind.clone();
         match token_kind {
-            TokenKind::Ident(_) => {
+            TokenKind::Ident(ident) => {
+                if ident == "import" {
+                    let _ = self.eat()?;
+                    let token = self.eat()?;
+                    match token.kind {
+                        TokenKind::Literal(TokenLiteralKind::String(s)) => return Ok(ItemKind::Import(s)),
+                        _ => return Err(ParsingError::UnexpectedToken(token)),
+                    }
+                }
                 if let TokenKind::Symbol(SymbolKind::ColonColon) = self.peek_nth(1)?.kind {
                     let function = self.parse_function()?;
                     Ok(ItemKind::Function(function))
@@ -732,7 +746,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                 "int" => Ok(Type::Int),
                 "float" => Ok(Type::Float),
                 "bool" => Ok(Type::Bool),
-                "void" => Ok(Type::Void),
+                "string" => Ok(Type::String),
                 _ => Err(ParsingError::UnexpectedToken(token)),
             },
             _ => Err(ParsingError::UnexpectedToken(token)),
@@ -778,7 +792,19 @@ impl<I: Iterator<Item = Token>> Parser<I> {
     pub fn parse(self) -> ParsingResult<Ast> {
         let mut nodes = Vec::new();
         for item in self {
-            nodes.push(item?);
+            let item = item?;
+            match item.kind {
+                ItemKind::Function(_) => nodes.push(item),
+                ItemKind::Import(s) => {
+                    let path = std::path::Path::new(&s);
+                    let file = std::fs::read_to_string(path).expect("could not read file");
+                    let lexer = crate::tokenizing::Lexer::new(&file);
+                    let tokens = lexer.collect::<Vec<_>>();
+                    let parser = Parser::new(tokens.into_iter());
+                    let ast = parser.parse()?;
+                    nodes.extend(ast.nodes);
+                }
+            }
         }
         Ok(Ast { nodes })
     }

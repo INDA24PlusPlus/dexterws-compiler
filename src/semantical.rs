@@ -273,6 +273,7 @@ impl SemanticAnalyzer {
                     let extended_func = self.analyze_function(func)?;
                     module.functions.push(extended_func);
                 }
+                ItemKind::Import(_) => {}
             }
         }
 
@@ -314,6 +315,7 @@ impl SemanticAnalyzer {
                     self.functions
                         .insert(func.sig.name.value.clone(), func.sig.clone());
                 }
+                ItemKind::Import(_) => {}
             }
         }
         Ok(())
