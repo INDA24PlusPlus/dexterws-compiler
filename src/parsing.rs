@@ -26,7 +26,9 @@
 
 use itertools::{peek_nth, PeekNth};
 
-use crate::tokenizing::{NumberKind, SymbolKind, Token, TokenKind, TokenLocation};
+use crate::tokenizing::{
+    LiteralKind as TokenLiteralKind, NumberKind, SymbolKind, Token, TokenKind, TokenLocation,
+};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct NodeSpan {
@@ -40,6 +42,7 @@ pub enum Type {
     Float,
     Bool,
     Void,
+    String,
 }
 
 impl std::fmt::Display for Type {
@@ -49,6 +52,7 @@ impl std::fmt::Display for Type {
             Type::Float => "float",
             Type::Bool => "bool",
             Type::Void => "void",
+            Type::String => "string",
         };
         write!(f, "{}", s)
     }
@@ -189,11 +193,12 @@ pub enum UnaryOpKind {
     Cast(Type),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LiteralKind {
     Int(i64),
     Float(f64),
     Bool(bool),
+    String(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -220,6 +225,97 @@ pub struct Parser<I: Iterator<Item = Token>> {
 pub enum ParsingError {
     UnexpectedToken(Token),
     UnexpectedEndOfInput,
+}
+
+impl ParsingError {
+    pub fn to_string(self, source: &str) -> String {
+        match self {
+            ParsingError::UnexpectedToken(token) => {
+                let lines = source.lines().collect::<Vec<_>>();
+                let first_line = token.location.line_span.0 - 1;
+                let last_line = token.location.line_span.1 - 1;
+                let pre_first_line = first_line.checked_sub(1);
+                let post_last_line = last_line + 1;
+                let max_line_num_len = post_last_line.to_string().len();
+
+                let mut string = String::new();
+
+                string.push_str(&format!(
+                    "\x1b[31merror\x1b[0m: unexpected token at {}:{}\n",
+                    token.location.line_span.0, token.location.col_span.0
+                ));
+
+                if let Some(idx) = pre_first_line {
+                    let line = lines[idx as usize];
+                    let line_num = idx + 1;
+                    let line_num_str = line_num.to_string();
+                    let padding = max_line_num_len - line_num_str.len();
+                    string.push_str(&format!(
+                        " \x1b[34m{}{} | \x1b[0m",
+                        " ".repeat(padding),
+                        line_num_str
+                    ));
+                    string.push_str(line);
+                    string.push('\n');
+                }
+
+                for i in first_line..=last_line {
+                    let line = lines[i as usize];
+                    let line_num = i + 1;
+                    let line_num_str = line_num.to_string();
+                    let padding = max_line_num_len - line_num_str.len();
+                    let col_start = if i == first_line {
+                        token.location.col_span.0 - 1
+                    } else {
+                        0
+                    };
+                    let col_end = if i == last_line {
+                        token.location.col_span.1 - 1
+                    } else {
+                        line.len() as u32
+                    };
+                    let mut caret = String::new();
+                    for _ in 0..col_start {
+                        caret.push(' ');
+                    }
+                    for _ in col_start..col_end {
+                        caret.push('^');
+                    }
+                    string.push_str(&format!(
+                        " \x1b[34m{}{} | \x1b[0m",
+                        " ".repeat(padding),
+                        line_num_str
+                    ));
+                    string.push_str(line);
+                    string.push('\n');
+                    string.push_str(&format!(
+                        " \x1b[34m{} | \x1b[0m",
+                        " ".repeat(max_line_num_len)
+                    ));
+                    string.push_str(&format!("\x1b[31m{}\x1b[0m\n", caret));
+                }
+
+                if post_last_line < lines.len() as u32 {
+                    let line = lines[post_last_line as usize];
+                    let line_num = post_last_line + 1;
+                    let line_num_str = line_num.to_string();
+                    let padding = max_line_num_len - line_num_str.len();
+                    string.push_str(&format!(
+                        " \x1b[34m{}{} | \x1b[0m",
+                        " ".repeat(padding),
+                        line_num_str
+                    ));
+                    string.push_str(line);
+                    string.push('\n');
+                }
+
+                string
+            }
+            ParsingError::UnexpectedEndOfInput => {
+                "\x1b[31merror\x1b[0m: unexpected end of input".to_string()
+            }
+        }
+    }
 }
 
 pub type ParsingResult<T> = Result<T, ParsingError>;
@@ -278,10 +374,13 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         let start = lhs_token.location;
 
         let lhs_kind = match lhs_token.kind {
-            TokenKind::Number(n) => {
+            TokenKind::Literal(n) => {
                 let kind = match n {
-                    NumberKind::Int(i) => LiteralKind::Int(i),
-                    NumberKind::Float(f) => LiteralKind::Float(f),
+                    TokenLiteralKind::Number(n) => match n {
+                        NumberKind::Int(n) => LiteralKind::Int(n),
+                        NumberKind::Float(n) => LiteralKind::Float(n),
+                    },
+                    TokenLiteralKind::String(s) => LiteralKind::String(s),
                 };
                 ExprKind::Literal(kind)
             }

@@ -79,8 +79,14 @@ pub enum NumberKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TokenKind {
+pub enum LiteralKind {
     Number(NumberKind),
+    String(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenKind {
+    Literal(LiteralKind),
     Ident(String),
     Symbol(SymbolKind),
 }
@@ -167,7 +173,43 @@ impl<'a> Lexer<'a> {
             NumberKind::Int(value.parse().unwrap())
         };
         Token {
-            kind: TokenKind::Number(number),
+            kind: TokenKind::Literal(LiteralKind::Number(number)),
+            location: loc,
+        }
+    }
+
+    pub fn eat_string(&mut self) -> Token {
+        let mut quote_count = 0;
+        let (value, loc) = self.eat_until(|c| {
+            if quote_count == 2 {
+                return true;
+            }
+            if c == '"' {
+                quote_count += 1;
+            }
+            false
+        });
+        let mut escaped_string = String::new();
+        let mut chars = value[1..value.len() - 1].chars();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                match chars.next() {
+                    Some('n') => escaped_string.push('\n'),
+                    Some('t') => escaped_string.push('\t'),
+                    Some('r') => escaped_string.push('\r'),
+                    Some('0') => escaped_string.push('\0'),
+                    Some('\'') => escaped_string.push('\''),
+                    Some('"') => escaped_string.push('"'),
+                    Some('\\') => escaped_string.push('\\'),
+                    Some(c) => escaped_string.push(c),
+                    None => (),
+                }
+            } else {
+                escaped_string.push(c);
+            }
+        }
+        Token {
+            kind: TokenKind::Literal(LiteralKind::String(escaped_string)),
             location: loc,
         }
     }
@@ -218,6 +260,7 @@ impl<'a> Iterator for Lexer<'a> {
                 let token = match c {
                     '0'..='9' => self.eat_number(),
                     'a'..='z' | 'A'..='Z' => self.eat_ident(),
+                    '"' => self.eat_string(),
                     _ => self.eat_symbol(),
                 };
                 Some(token)

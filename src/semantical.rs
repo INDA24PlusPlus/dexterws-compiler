@@ -39,6 +39,8 @@ pub struct SemanticAnalyzer {
 const BUILTINS: &[(&str, Type, Type)] = &[
     ("iprint", Type::Int, Type::Int),
     ("fprint", Type::Float, Type::Int),
+    ("bprint", Type::Bool, Type::Int),
+    ("printf", Type::String, Type::Int),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -478,6 +480,7 @@ impl SemanticAnalyzer {
                 LiteralKind::Int(_) => Ok(Type::Int),
                 LiteralKind::Float(_) => Ok(Type::Float),
                 LiteralKind::Bool(_) => Ok(Type::Bool),
+                LiteralKind::String(_) => Ok(Type::String),
             },
             ExprKind::Var(var) => {
                 if let Some(var) = self.variables.get(&var.value) {

@@ -32,6 +32,9 @@ impl Type {
             Type::Float => context.f64_type().as_basic_type_enum(),
             Type::Bool => context.bool_type().as_basic_type_enum(),
             Type::Void => context.i64_type().as_basic_type_enum(),
+            Type::String => context
+                .ptr_type(AddressSpace::default())
+                .as_basic_type_enum(),
         }
     }
 }
@@ -100,6 +103,7 @@ impl<'a> CodeGen<'a> {
         self.generate_printf();
         self.generate_iprint();
         self.generate_fprint();
+        self.generate_bprint();
         for function in module.functions.iter() {
             let mut args = vec![];
             for arg in function.inner.sig.args.iter() {
@@ -153,12 +157,53 @@ impl<'a> CodeGen<'a> {
         self.llvm_builder.position_at_end(basic_block);
         let fmt = self
             .llvm_builder
-            .build_global_string_ptr("lol %lf\n", "fmt_fprint")
+            .build_global_string_ptr("%lf\n", "fmt_fprint")
             .unwrap();
         let arg = fprint.get_first_param().unwrap();
         let call = self
             .llvm_builder
             .build_call(printf, &[fmt.as_pointer_value().into(), arg.into()], "call")
+            .unwrap();
+        let call_value = call.try_as_basic_value().left().unwrap();
+        self.llvm_builder.build_return(Some(&call_value)).unwrap();
+    }
+
+    pub fn generate_bprint(&mut self) {
+        let printf = self.llvm_module.get_function("printf").unwrap();
+        let bool_type = Type::Bool.to_llvm(self.context);
+        let bprint_type = self.context.i64_type().fn_type(&[bool_type.into()], false);
+        let bprint = self.llvm_module.add_function("bprint", bprint_type, None);
+        let basic_block = self.context.append_basic_block(bprint, "entry");
+        self.llvm_builder.position_at_end(basic_block);
+        let fmt = self
+            .llvm_builder
+            .build_global_string_ptr("%s\n", "fmt_bprint")
+            .unwrap();
+        let arg = bprint.get_first_param().unwrap();
+        let true_str = self
+            .llvm_builder
+            .build_global_string_ptr("true", "true")
+            .unwrap();
+        let false_str = self
+            .llvm_builder
+            .build_global_string_ptr("false", "false")
+            .unwrap();
+        let call = self
+            .llvm_builder
+            .build_select(
+                arg.into_int_value(),
+                true_str.as_pointer_value(),
+                false_str.as_pointer_value(),
+                "select",
+            )
+            .unwrap();
+        let call = self
+            .llvm_builder
+            .build_call(
+                printf,
+                &[fmt.as_pointer_value().into(), call.into()],
+                "call",
+            )
             .unwrap();
         let call_value = call.try_as_basic_value().left().unwrap();
         self.llvm_builder.build_return(Some(&call_value)).unwrap();
@@ -254,6 +299,13 @@ impl<'a> CodeGen<'a> {
             LiteralKind::Int(i) => self.context.i64_type().const_int(*i as u64, false).into(),
             LiteralKind::Float(f) => self.context.f64_type().const_float(*f).into(),
             LiteralKind::Bool(b) => self.context.bool_type().const_int(*b as u64, false).into(),
+            LiteralKind::String(s) => {
+                let string = self
+                    .llvm_builder
+                    .build_global_string_ptr(s, "string")
+                    .unwrap();
+                string.as_pointer_value().into()
+            }
         }
     }
 
