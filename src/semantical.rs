@@ -83,8 +83,126 @@ pub enum SemanticError {
         statement: Statement,
     },
     UnsupportedBinOp {
+        ty: Type,
         expr: Expr,
     },
+    UnreachableCode {
+        statement: Statement,
+    },
+}
+
+impl SemanticError {
+    pub fn to_string(self, source: &str) -> String {
+        let mut string = String::new();
+        let lines = source.lines().collect::<Vec<_>>();
+        let span = match &self {
+            SemanticError::ExpressionTypeMismatch { expr, .. } => expr.span,
+            SemanticError::FunctionNotFound { expr, .. } => expr.span,
+            SemanticError::ArgumentCountMismatch { expr, .. } => expr.span,
+            SemanticError::ArgumentTypeMismatch { expr, .. } => expr.span,
+            SemanticError::BreakOutsideOfLoop { statement } => statement.span,
+            SemanticError::DoubleVariableDeclaration { expr, .. } => expr.span,
+            SemanticError::DoubleFunctionDeclaration { name } => name.span,
+            SemanticError::VariableNotFound { expr, .. } => expr.span,
+            SemanticError::ReturnOutsideOfFunction { stmt } => stmt.span,
+            SemanticError::ReturnTypeMismatch { statement, .. } => statement.span,
+            SemanticError::UnsupportedBinOp { expr, .. } => expr.span,
+            SemanticError::UnreachableCode { statement } => statement.span,
+        };
+
+        let error_text = match &self {
+            SemanticError::ExpressionTypeMismatch { expected, found, .. } => {
+                format!("invalid expression type, expected {}, found {}", expected, found)
+            }
+            SemanticError::FunctionNotFound { name, .. } => {
+                format!("function '{}' is not defined", name)
+            }
+            SemanticError::ArgumentCountMismatch { expected, found, .. } => {
+                format!("invalid argument count, expected {} arguments, found {}", expected, found)
+            }
+            SemanticError::ArgumentTypeMismatch { expected, found, .. } => {
+                format!("invalid argument type, expected {}, found {}", expected, found)
+            }
+            SemanticError::BreakOutsideOfLoop { .. } => "cannot break outside of loop".to_string(),
+            SemanticError::DoubleVariableDeclaration { name, .. } => {
+                format!("variable '{}' already declared", name.value)
+            }
+            SemanticError::DoubleFunctionDeclaration { name } => {
+                format!("function '{}' already declared", name.value)
+            }
+            SemanticError::VariableNotFound { name, .. } => {
+                format!("variable '{}' is not defined", name.value)
+            }
+            SemanticError::ReturnOutsideOfFunction { .. } => "cannot return outside of function".to_string(),
+            SemanticError::ReturnTypeMismatch { expected, found, .. } => {
+                format!("invalid return type, expected {}, found {}", expected, found)
+            }
+            SemanticError::UnsupportedBinOp { ty, .. } => {
+                format!("unsupported binary operation for type {}", ty)
+            }
+            SemanticError::UnreachableCode { .. } => "this code is unreachable".to_string(),
+        };
+
+        string.push_str(&format!("\x1b[31merror\x1b[0m: {}\n", error_text));
+        let first_line = span.start.line_span.0 - 1;
+        let last_line = span.end.line_span.0 - 1;
+        let pre_first_line = first_line.checked_sub(1);
+        let post_last_line = last_line + 1;
+        let max_line_num_len = post_last_line.to_string().len();
+
+        if let Some(idx) = pre_first_line {
+            let line = lines[idx as usize];
+            let line_num = idx + 1;
+            let line_num_str = line_num.to_string();
+            let padding = max_line_num_len - line_num_str.len();
+            string.push_str(&format!(" \x1b[34m{}{} | \x1b[0m", " ".repeat(padding), line_num_str));
+            string.push_str(line);
+            string.push('\n');
+        }
+
+        for i in first_line..=last_line {
+            let line = lines[i as usize];
+            let line_num = i + 1;
+            let line_num_str = line_num.to_string();
+            let padding = max_line_num_len - line_num_str.len();
+            let col_start = if i == first_line {
+                span.start.col_span.0 - 1
+            } else {
+                0
+            };
+            let col_end = if i == last_line {
+                span.end.col_span.1 - 1
+            } else {
+                line.len() as u32
+            };
+            let mut caret = String::new();
+            for _ in 0..col_start {
+                caret.push(' ');
+            }
+            for _ in col_start..col_end {
+                caret.push('^');
+            }
+            string.push_str(&format!(" \x1b[34m{}{} | \x1b[0m", " ".repeat(padding), line_num_str));
+            string.push_str(line);
+            string.push('\n');
+            string.push_str(&format!(" \x1b[34m{} | \x1b[0m", " ".repeat(max_line_num_len)));
+            string.push_str(&format!("\x1b[31m{}\x1b[0m\n", caret));
+        }
+
+        if post_last_line < lines.len() as u32 {
+            let line = lines[post_last_line as usize];
+            let line_num = post_last_line + 1;
+            let line_num_str = line_num.to_string();
+            let padding = max_line_num_len - line_num_str.len();
+            string.push_str(&format!(" \x1b[34m{}{} | \x1b[0m", " ".repeat(padding), line_num_str));
+            string.push_str(line);
+            string.push('\n');
+        }
+
+
+
+        string
+    }
 }
 
 type SemanticResult<T> = Result<T, SemanticError>;
@@ -119,7 +237,7 @@ impl SemanticAnalyzer {
             }
         }
 
-        Ok(module)
+        return Ok(module);
     }
 
     fn declare_builtins(&mut self) {
@@ -182,7 +300,7 @@ impl SemanticAnalyzer {
         Ok(extended_func)
     }
 
-    fn analyze_statement(&mut self, stmt: &Statement) -> SemanticResult<()> {
+    fn analyze_statement(&mut self, stmt: &Statement) -> SemanticResult<bool> {
         match &stmt.kind {
             StatementKind::Expr(expr) => {
                 self.analyze_expr(expr)?;
@@ -197,10 +315,11 @@ impl SemanticAnalyzer {
                         statement: stmt.clone(),
                     });
                 }
+                return Ok(true);
             }
-            StatementKind::Return(_) => self.analyze_return(stmt)?,
+            StatementKind::Return(_) => {self.analyze_return(stmt)?; return Ok(true);},
         }
-        Ok(())
+        Ok(false)
     }
 
     fn analyze_body(&mut self, body: &Block) -> SemanticResult<()> {
@@ -372,6 +491,7 @@ impl SemanticAnalyzer {
 
         if lhs_ty == Type::Float && (binop.kind == BinOpKind::And || binop.kind == BinOpKind::Or) {
             return Err(SemanticError::UnsupportedBinOp {
+                ty: Type::Float,
                 expr: expr.clone(),
             });
         }
