@@ -26,7 +26,7 @@ pub struct CodeGen<'a> {
 }
 
 impl Type {
-    fn to_llvm(self, context: &LLVMContext) -> inkwell::types::BasicTypeEnum {
+    fn to_llvm<'a>(&self, context: &'a LLVMContext) -> inkwell::types::BasicTypeEnum<'a> {
         match self {
             Type::Int => context.i64_type().as_basic_type_enum(),
             Type::Float => context.f64_type().as_basic_type_enum(),
@@ -35,6 +35,7 @@ impl Type {
             Type::String => context
                 .ptr_type(AddressSpace::default())
                 .as_basic_type_enum(),
+            Type::Struct(name) => context.get_struct_type(name).unwrap().as_basic_type_enum()
         }
     }
 }
@@ -100,10 +101,13 @@ impl<'a> CodeGen<'a> {
     }
 
     pub fn declare_functions(&mut self, module: &Module) {
+        // Generate builtin functions
         self.generate_printf();
         self.generate_iprint();
         self.generate_fprint();
         self.generate_bprint();
+
+        // Declare all user functions
         for function in module.functions.iter() {
             let mut args = vec![];
             for arg in function.inner.sig.args.iter() {
@@ -116,7 +120,24 @@ impl<'a> CodeGen<'a> {
         }
     }
 
+    pub fn declare_structs(&mut self, module: &Module) {
+        for struct_decl in module.structs.iter() {
+            let struct_ = struct_decl.1;
+            self.context.opaque_struct_type(&struct_.name.value);
+        }
+        for struct_decl in module.structs.iter() {
+            let struct_ = struct_decl.1;
+            let struct_type = self.context.get_struct_type(&struct_.name.value).unwrap();
+            let mut members = vec![];
+            for field in struct_.fields.iter() {
+                members.push(field.ty.to_llvm(self.context));
+            }
+            struct_type.set_body(&members, false);
+        }
+    }
+
     pub fn generate(&mut self, module: Module) {
+        self.declare_structs(&module);
         self.declare_functions(&module);
         for function in module.functions.iter() {
             self.generate_function(function);

@@ -36,13 +36,14 @@ pub struct NodeSpan {
     pub end: TokenLocation,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int,
     Float,
     Bool,
     Void,
     String,
+    Struct(String),
 }
 
 impl std::fmt::Display for Type {
@@ -53,6 +54,7 @@ impl std::fmt::Display for Type {
             Type::Bool => "bool",
             Type::Void => "void",
             Type::String => "string",
+            Type::Struct(s) => s,
         };
         write!(f, "{}", s)
     }
@@ -67,6 +69,19 @@ pub struct Ast {
 pub enum ItemKind {
     Function(Function),
     Import(String),
+    Struct(Struct),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Field {
+    pub name: Identifier,
+    pub ty: Type,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Struct {
+    pub name: Identifier,
+    pub fields: Vec<Field>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -624,10 +639,63 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                 "float" => Ok(Type::Float),
                 "bool" => Ok(Type::Bool),
                 "string" => Ok(Type::String),
-                _ => Err(ParsingError::UnexpectedToken(token)),
+                _ => Ok(Type::Struct(s.to_owned())),
             },
             _ => Err(ParsingError::UnexpectedToken(token)),
         }
+    }
+
+    pub fn parse_field(&mut self) -> ParsingResult<Field> {
+        let name = self.eat()?;
+        let name = match name.kind {
+            TokenKind::Ident(s) => Identifier {
+                value: s,
+                span: NodeSpan {
+                    start: name.location,
+                    end: name.location,
+                },
+            },
+            _ => return Err(ParsingError::UnexpectedToken(name)),
+        };
+        let colon = self.eat()?;
+        if let TokenKind::Symbol(SymbolKind::Colon) = colon.kind {
+        } else {
+            return Err(ParsingError::UnexpectedToken(colon));
+        }
+        let ty = self.parse_type()?;
+        Ok(Field { name, ty })
+    }
+
+    pub fn parse_struct(&mut self) -> ParsingResult<Struct> {
+        let name = self.eat()?;
+        let name = match name.kind {
+            TokenKind::Ident(s) => Identifier {
+                value: s,
+                span: NodeSpan {
+                    start: name.location,
+                    end: name.location,
+                },
+            },
+            _ => return Err(ParsingError::UnexpectedToken(name)),
+        };
+        let _coloncolon = self.eat_and_assert(TokenKind::Symbol(SymbolKind::ColonColon))?;
+        let _struct = self.eat_and_assert(TokenKind::Ident("struct".to_string()))?;
+        let _lbrace = self.eat_and_assert(TokenKind::Symbol(SymbolKind::LBrace))?;
+        let mut fields = Vec::new();
+        loop {
+            match self.peek()?.kind {
+                TokenKind::Ident(_) => {
+                    fields.push(self.parse_field()?);
+                    self.eat_and_assert(TokenKind::Symbol(SymbolKind::Semicolon))?;
+                }
+                TokenKind::Symbol(SymbolKind::RBrace) => {
+                    let _ = self.eat()?;
+                    break;
+                }
+                _ => return Err(ParsingError::UnexpectedToken(self.peek()?.clone())),
+            }
+        }
+        Ok(Struct { name, fields })
     }
 
     pub fn parse_item_kind(&mut self) -> ParsingResult<ItemKind> {
@@ -638,15 +706,30 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                     let _ = self.eat()?;
                     let token = self.eat()?;
                     match token.kind {
-                        TokenKind::Literal(TokenLiteralKind::String(s)) => return Ok(ItemKind::Import(s)),
+                        TokenKind::Literal(TokenLiteralKind::String(s)) => {
+                            return Ok(ItemKind::Import(s))
+                        }
                         _ => return Err(ParsingError::UnexpectedToken(token)),
                     }
                 }
-                if let TokenKind::Symbol(SymbolKind::ColonColon) = self.peek_nth(1)?.kind {
-                    let function = self.parse_function()?;
-                    Ok(ItemKind::Function(function))
+                let nth_1 = self.peek_nth(1)?;
+                if let TokenKind::Symbol(SymbolKind::ColonColon) = nth_1.kind {
+                    let nth_2 = self.peek_nth(2)?;
+                    match &nth_2.kind {
+                        TokenKind::Ident(ident) => {
+                            if ident == "struct" {
+                                Ok(ItemKind::Struct(self.parse_struct()?))
+                            } else {
+                                return Err(ParsingError::UnexpectedToken(nth_2.clone()));
+                            }
+                        }
+                        TokenKind::Symbol(SymbolKind::LParen) => {
+                            Ok(ItemKind::Function(self.parse_function()?))
+                        }
+                        _ => return Err(ParsingError::UnexpectedToken(nth_2.clone())),
+                    }
                 } else {
-                    Err(ParsingError::UnexpectedToken(self.peek()?.clone()))
+                    Err(ParsingError::UnexpectedToken(nth_1.clone()))
                 }
             }
             _ => Err(ParsingError::UnexpectedToken(self.peek()?.clone())),
@@ -735,11 +818,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
     }
 
     pub fn parse_fn_ret_ty(&mut self) -> ParsingResult<Type> {
-        let arrow = self.peek()?;
-        if arrow.kind == TokenKind::Symbol(SymbolKind::LBrace) {
-            return Ok(Type::Void);
-        }
-        let _ = self.eat()?;
+        let _arrow = self.eat_and_assert(TokenKind::Symbol(SymbolKind::RArrow))?;
         let token = self.eat()?;
         match &token.kind {
             TokenKind::Ident(s) => match s.as_str() {
@@ -747,7 +826,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                 "float" => Ok(Type::Float),
                 "bool" => Ok(Type::Bool),
                 "string" => Ok(Type::String),
-                _ => Err(ParsingError::UnexpectedToken(token)),
+                _ => Ok(Type::Struct(s.to_owned())),
             },
             _ => Err(ParsingError::UnexpectedToken(token)),
         }
@@ -794,7 +873,6 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         for item in self {
             let item = item?;
             match item.kind {
-                ItemKind::Function(_) => nodes.push(item),
                 ItemKind::Import(s) => {
                     let path = std::path::Path::new(&s);
                     let file = std::fs::read_to_string(path).expect("could not read file");
@@ -804,6 +882,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                     let ast = parser.parse()?;
                     nodes.extend(ast.nodes);
                 }
+                _ => nodes.push(item),
             }
         }
         Ok(Ast { nodes })
