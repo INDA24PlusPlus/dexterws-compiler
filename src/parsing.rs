@@ -851,7 +851,10 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         let name = self.parse_expr(0)?;
         let _walrus = self.eat()?;
         let value = self.parse_expr(0)?;
-        Ok(Assignment { assignee: name, value })
+        Ok(Assignment {
+            assignee: name,
+            value,
+        })
     }
 
     pub fn parse_function_arg(&mut self) -> ParsingResult<(String, Type)> {

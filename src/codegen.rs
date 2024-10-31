@@ -312,7 +312,10 @@ impl<'a> CodeGen<'a> {
         false
     }
 
-    pub fn generate_expr<const RET_PTR: bool>(&mut self, expr: &Expr) -> inkwell::values::BasicValueEnum<'a> {
+    pub fn generate_expr<const RET_PTR: bool>(
+        &mut self,
+        expr: &Expr,
+    ) -> inkwell::values::BasicValueEnum<'a> {
         match &expr.kind {
             ExprKind::Literal(lit) => self.generate_literal(lit),
             ExprKind::Var(ident) => self.generate_var(ident, RET_PTR),
@@ -339,7 +342,11 @@ impl<'a> CodeGen<'a> {
         }
     }
 
-    pub fn generate_var(&mut self, ident: &Identifier, ret_ptr: bool) -> inkwell::values::BasicValueEnum<'a> {
+    pub fn generate_var(
+        &mut self,
+        ident: &Identifier,
+        ret_ptr: bool,
+    ) -> inkwell::values::BasicValueEnum<'a> {
         let (ptr, ty) = self.variables.get(&ident.value).unwrap();
         if ret_ptr {
             ptr.as_basic_value_enum()
@@ -607,7 +614,9 @@ impl<'a> CodeGen<'a> {
     pub fn generate_assignment(&mut self, assignment: &Assignment) {
         let ptr = self.generate_expr::<true>(&assignment.assignee);
         let value = self.generate_expr::<false>(&assignment.value);
-        self.llvm_builder.build_store(ptr.into_pointer_value(), value).unwrap();
+        self.llvm_builder
+            .build_store(ptr.into_pointer_value(), value)
+            .unwrap();
     }
 
     pub fn generate_if(&mut self, cond: &Expr, then: &Block, or: &Option<Block>) {
@@ -676,12 +685,19 @@ impl<'a> CodeGen<'a> {
         let (field_ty, field_idx) = struct_ty.fields.get(&field.value).unwrap();
         let field_ptr = self
             .llvm_builder
-            .build_struct_gep(struct_type, lhs.into_pointer_value(), *field_idx as u32, "field_access")
+            .build_struct_gep(
+                struct_type,
+                lhs.into_pointer_value(),
+                *field_idx as u32,
+                "field_access",
+            )
             .unwrap();
         if ret_ptr {
             field_ptr.into()
         } else {
-            self.llvm_builder.build_load(field_ty.to_llvm(self.context), field_ptr, "field_access").unwrap()
+            self.llvm_builder
+                .build_load(field_ty.to_llvm(self.context), field_ptr, "field_access")
+                .unwrap()
         }
     }
 
@@ -703,6 +719,8 @@ impl<'a> CodeGen<'a> {
                 .unwrap();
             self.llvm_builder.build_store(field_ptr, field_val);
         }
-        self.llvm_builder.build_load(struct_type, struct_val, "struct_init").unwrap()
+        self.llvm_builder
+            .build_load(struct_type, struct_val, "struct_init")
+            .unwrap()
     }
 }
