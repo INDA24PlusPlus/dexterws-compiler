@@ -138,7 +138,7 @@ pub struct Statement {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Assignment {
-    pub name: Identifier,
+    pub assignee: Expr,
     pub value: Expr,
 }
 
@@ -222,8 +222,22 @@ pub enum ExprKind {
     Literal(LiteralKind),
     Var(Identifier),
     BinOp(BinOp),
-    UnaryOp { kind: UnaryOpKind, rhs: Box<Expr> },
-    Call { name: String, args: Vec<Expr> },
+    UnaryOp {
+        kind: UnaryOpKind,
+        rhs: Box<Expr>,
+    },
+    Call {
+        name: String,
+        args: Vec<Expr>,
+    },
+    FieldAccess {
+        lhs: Box<Expr>,
+        field: Identifier,
+    },
+    StructInit {
+        name: Identifier,
+        fields: Vec<(String, Expr)>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -403,31 +417,78 @@ impl<I: Iterator<Item = Token>> Parser<I> {
             TokenKind::Ident(ident) => {
                 if ident == "true" || ident == "false" {
                     ExprKind::Literal(LiteralKind::Bool(ident == "true"))
-                } else if let TokenKind::Symbol(SymbolKind::LParen) = self.peek()?.kind {
-                    let _ = self.eat()?;
-                    let mut args = Vec::new();
-                    loop {
-                        let token = self.peek()?;
-                        match token.kind {
-                            TokenKind::Symbol(SymbolKind::RParen) => {
-                                let _ = self.eat()?;
-                                break;
+                } else {
+                    match self.peek()?.kind {
+                        TokenKind::Symbol(SymbolKind::LParen) => {
+                            let _ = self.eat()?;
+                            let mut args = Vec::new();
+                            loop {
+                                let token = self.peek()?;
+                                match token.kind {
+                                    TokenKind::Symbol(SymbolKind::RParen) => {
+                                        let _ = self.eat()?;
+                                        break;
+                                    }
+                                    _ => {
+                                        let expr = self.parse_expr(0)?;
+                                        args.push(expr);
+                                    }
+                                }
                             }
-                            _ => {
-                                let expr = self.parse_expr(0)?;
-                                args.push(expr);
+                            ExprKind::Call { name: ident, args }
+                        }
+                        TokenKind::Symbol(SymbolKind::LBrace) => {
+                            let _ = self.eat()?;
+                            let mut fields = Vec::new();
+                            loop {
+                                let token = self.peek()?;
+                                match token.kind {
+                                    TokenKind::Symbol(SymbolKind::RBrace) => {
+                                        let _ = self.eat()?;
+                                        break;
+                                    }
+                                    TokenKind::Symbol(SymbolKind::Comma) => {
+                                        let _ = self.eat()?;
+                                    }
+                                    _ => {
+                                        let field_name = self.eat()?;
+                                        let field_name = match field_name.kind {
+                                            TokenKind::Ident(s) => s,
+                                            _ => {
+                                                return Err(ParsingError::UnexpectedToken(
+                                                    field_name,
+                                                ))
+                                            }
+                                        };
+                                        let _colon = self.eat()?;
+                                        if let TokenKind::Symbol(SymbolKind::Colon) = _colon.kind {
+                                        } else {
+                                            return Err(ParsingError::UnexpectedToken(_colon));
+                                        }
+                                        let expr = self.parse_expr(0)?;
+                                        fields.push((field_name, expr));
+                                    }
+                                }
+                            }
+                            ExprKind::StructInit {
+                                name: Identifier {
+                                    value: ident,
+                                    span: NodeSpan {
+                                        start: lhs_token.location,
+                                        end: lhs_token.location,
+                                    },
+                                },
+                                fields,
                             }
                         }
+                        _ => ExprKind::Var(Identifier {
+                            value: ident,
+                            span: NodeSpan {
+                                start: lhs_token.location,
+                                end: lhs_token.location,
+                            },
+                        }),
                     }
-                    ExprKind::Call { name: ident, args }
-                } else {
-                    ExprKind::Var(Identifier {
-                        value: ident,
-                        span: NodeSpan {
-                            start: lhs_token.location,
-                            end: lhs_token.location,
-                        },
-                    })
                 }
             }
             TokenKind::Symbol(ref symbol) => match symbol {
@@ -478,6 +539,31 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                 break;
             }
             let op = match rhs_token.kind {
+                TokenKind::Symbol(SymbolKind::Dot) => {
+                    let _dot = self.eat()?;
+                    let field_token = self.eat()?;
+                    let identifier = match field_token.kind {
+                        TokenKind::Ident(s) => s,
+                        _ => return Err(ParsingError::UnexpectedToken(field_token)),
+                    };
+                    lhs = Expr {
+                        kind: ExprKind::FieldAccess {
+                            lhs: Box::new(lhs),
+                            field: Identifier {
+                                value: identifier,
+                                span: NodeSpan {
+                                    start: field_token.location,
+                                    end: field_token.location,
+                                },
+                            },
+                        },
+                        span: NodeSpan {
+                            start,
+                            end: self.get_location()?,
+                        },
+                    };
+                    continue;
+                }
                 TokenKind::Symbol(ref symbol) => match BinOpKind::try_from(symbol.clone()) {
                     Ok(op) => op,
                     Err(_) => break,
@@ -590,26 +676,32 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                 })
             }
             _ => {
-                let next = self.peek_nth(1)?;
-                match next.kind {
-                    TokenKind::Symbol(SymbolKind::Walrus) => Ok(Statement {
-                        kind: StatementKind::Decl(self.parse_local()?),
-                        span: NodeSpan {
-                            start,
-                            end: self.get_location()?,
-                        },
-                    }),
-                    TokenKind::Symbol(SymbolKind::AssignEq) => Ok(Statement {
-                        kind: StatementKind::Assign(self.parse_local()?),
-                        span: NodeSpan {
-                            start,
-                            end: self.get_location()?,
-                        },
-                    }),
-                    TokenKind::Symbol(SymbolKind::LParen) => {
-                        let call = self.parse_expr(0)?;
+                let expr = self.parse_expr(0)?;
+                match self.peek()?.kind {
+                    TokenKind::Symbol(SymbolKind::Walrus) => {
+                        let _walrus = self.eat()?;
+                        let value = self.parse_expr(0)?;
+                        let kind = StatementKind::Decl(Assignment {
+                            assignee: expr,
+                            value,
+                        });
                         Ok(Statement {
-                            kind: StatementKind::Expr(call),
+                            kind,
+                            span: NodeSpan {
+                                start,
+                                end: self.get_location()?,
+                            },
+                        })
+                    }
+                    TokenKind::Symbol(SymbolKind::AssignEq) => {
+                        let _equals = self.eat()?;
+                        let value = self.parse_expr(0)?;
+                        let kind = StatementKind::Assign(Assignment {
+                            assignee: expr,
+                            value,
+                        });
+                        Ok(Statement {
+                            kind,
                             span: NodeSpan {
                                 start,
                                 end: self.get_location()?,
@@ -617,9 +709,9 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                         })
                     }
                     _ => {
-                        let expr = self.parse_expr(0)?;
+                        let kind = StatementKind::Expr(expr);
                         Ok(Statement {
-                            kind: StatementKind::Expr(expr),
+                            kind,
                             span: NodeSpan {
                                 start,
                                 end: self.get_location()?,
@@ -756,10 +848,10 @@ impl<I: Iterator<Item = Token>> Parser<I> {
     }
 
     pub fn parse_local(&mut self) -> ParsingResult<Assignment> {
-        let name = self.parse_local_name()?;
+        let name = self.parse_expr(0)?;
         let _walrus = self.eat()?;
         let value = self.parse_expr(0)?;
-        Ok(Assignment { name, value })
+        Ok(Assignment { assignee: name, value })
     }
 
     pub fn parse_function_arg(&mut self) -> ParsingResult<(String, Type)> {

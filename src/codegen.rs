@@ -5,7 +5,7 @@ use crate::{
         Assignment, BinOp, BinOpKind, Block, Expr, ExprKind, Identifier, LiteralKind, Statement,
         StatementKind, Type, UnaryOpKind,
     },
-    semantical::{ExtendedFunction, Module},
+    semantical::{ExtendedFunction, ExtendedStruct, Module},
 };
 use inkwell::{
     builder::Builder as LLVMBuilder,
@@ -13,7 +13,7 @@ use inkwell::{
     module::Module as LLVMModule,
     targets::{CodeModel, RelocMode, Target, TargetMachine},
     types::{BasicType, BasicTypeEnum},
-    values::PointerValue,
+    values::{BasicValue, PointerValue},
     AddressSpace, OptimizationLevel,
 };
 
@@ -22,6 +22,7 @@ pub struct CodeGen<'a> {
     llvm_module: LLVMModule<'a>,
     llvm_builder: LLVMBuilder<'a>,
     variables: HashMap<String, (PointerValue<'a>, BasicTypeEnum<'a>)>,
+    struct_types: HashMap<String, ExtendedStruct>,
     loop_exits: Vec<inkwell::basic_block::BasicBlock<'a>>,
 }
 
@@ -35,7 +36,7 @@ impl Type {
             Type::String => context
                 .ptr_type(AddressSpace::default())
                 .as_basic_type_enum(),
-            Type::Struct(name) => context.get_struct_type(name).unwrap().as_basic_type_enum()
+            Type::Struct(name) => context.get_struct_type(name).unwrap().as_basic_type_enum(),
         }
     }
 }
@@ -48,6 +49,7 @@ impl<'a> CodeGen<'a> {
             llvm_module,
             llvm_builder,
             variables: HashMap::new(),
+            struct_types: HashMap::new(),
             loop_exits: vec![],
         }
     }
@@ -123,17 +125,21 @@ impl<'a> CodeGen<'a> {
     pub fn declare_structs(&mut self, module: &Module) {
         for struct_decl in module.structs.iter() {
             let struct_ = struct_decl.1;
-            self.context.opaque_struct_type(&struct_.name.value);
+            self.context.opaque_struct_type(&struct_.inner.name.value);
         }
         for struct_decl in module.structs.iter() {
             let struct_ = struct_decl.1;
-            let struct_type = self.context.get_struct_type(&struct_.name.value).unwrap();
+            let struct_type = self
+                .context
+                .get_struct_type(&struct_.inner.name.value)
+                .unwrap();
             let mut members = vec![];
-            for field in struct_.fields.iter() {
+            for field in struct_.inner.fields.iter() {
                 members.push(field.ty.to_llvm(self.context));
             }
             struct_type.set_body(&members, false);
         }
+        self.struct_types = module.structs.clone();
     }
 
     pub fn generate(&mut self, module: Module) {
@@ -279,7 +285,7 @@ impl<'a> CodeGen<'a> {
         match &statement.kind {
             StatementKind::Return(expr) => {
                 let value = if let Some(expr) = expr {
-                    self.generate_expr(expr)
+                    self.generate_expr::<false>(expr)
                 } else {
                     self.context.i64_type().const_int(0, false).into()
                 };
@@ -287,7 +293,7 @@ impl<'a> CodeGen<'a> {
                 return true;
             }
             StatementKind::Expr(expr) => {
-                self.generate_expr(expr);
+                self.generate_expr::<false>(expr);
             }
             StatementKind::Decl(assignment) => self.generate_assignment(assignment),
             StatementKind::Assign(assignment) => self.generate_assignment(assignment),
@@ -306,13 +312,15 @@ impl<'a> CodeGen<'a> {
         false
     }
 
-    pub fn generate_expr(&mut self, expr: &Expr) -> inkwell::values::BasicValueEnum<'a> {
+    pub fn generate_expr<const RET_PTR: bool>(&mut self, expr: &Expr) -> inkwell::values::BasicValueEnum<'a> {
         match &expr.kind {
             ExprKind::Literal(lit) => self.generate_literal(lit),
-            ExprKind::Var(ident) => self.generate_var(ident),
+            ExprKind::Var(ident) => self.generate_var(ident, RET_PTR),
             ExprKind::BinOp(binop) => self.generate_binop(binop),
             ExprKind::UnaryOp { kind, rhs } => self.generate_unaryop(kind, rhs),
             ExprKind::Call { name, args } => self.generate_call(name, args),
+            ExprKind::FieldAccess { lhs, field } => self.generate_field_acces(lhs, field, RET_PTR),
+            ExprKind::StructInit { name, fields } => self.generate_struct_init(name, fields),
         }
     }
 
@@ -331,16 +339,20 @@ impl<'a> CodeGen<'a> {
         }
     }
 
-    pub fn generate_var(&mut self, ident: &Identifier) -> inkwell::values::BasicValueEnum<'a> {
+    pub fn generate_var(&mut self, ident: &Identifier, ret_ptr: bool) -> inkwell::values::BasicValueEnum<'a> {
         let (ptr, ty) = self.variables.get(&ident.value).unwrap();
-        self.llvm_builder
-            .build_load(*ty, *ptr, &ident.value)
-            .unwrap()
+        if ret_ptr {
+            ptr.as_basic_value_enum()
+        } else {
+            self.llvm_builder
+                .build_load(*ty, *ptr, &ident.value)
+                .unwrap()
+        }
     }
 
     pub fn generate_binop(&mut self, binop: &BinOp) -> inkwell::values::BasicValueEnum<'a> {
-        let lhs = self.generate_expr(&binop.lhs);
-        let rhs = self.generate_expr(&binop.rhs);
+        let lhs = self.generate_expr::<false>(&binop.lhs);
+        let rhs = self.generate_expr::<false>(&binop.rhs);
         let ty = lhs.get_type();
         match ty {
             inkwell::types::BasicTypeEnum::FloatType(_) => match &binop.kind {
@@ -528,7 +540,7 @@ impl<'a> CodeGen<'a> {
         kind: &UnaryOpKind,
         expr: &Expr,
     ) -> inkwell::values::BasicValueEnum<'a> {
-        let value = self.generate_expr(expr);
+        let value = self.generate_expr::<false>(expr);
         match kind {
             UnaryOpKind::Neg => match value.get_type() {
                 inkwell::types::BasicTypeEnum::FloatType(_) => self
@@ -582,7 +594,7 @@ impl<'a> CodeGen<'a> {
         let function = self.llvm_module.get_function(name).unwrap();
         let mut llvm_args = vec![];
         for arg in args {
-            llvm_args.push(self.generate_expr(arg).into());
+            llvm_args.push(self.generate_expr::<false>(arg).into());
         }
         self.llvm_builder
             .build_call(function, &llvm_args, "call")
@@ -593,14 +605,13 @@ impl<'a> CodeGen<'a> {
     }
 
     pub fn generate_assignment(&mut self, assignment: &Assignment) {
-        let ident = &assignment.name.value;
-        let value = self.generate_expr(&assignment.value);
-        let (ptr, _ty) = self.variables.get(ident).unwrap();
-        self.llvm_builder.build_store(*ptr, value).unwrap();
+        let ptr = self.generate_expr::<true>(&assignment.assignee);
+        let value = self.generate_expr::<false>(&assignment.value);
+        self.llvm_builder.build_store(ptr.into_pointer_value(), value).unwrap();
     }
 
     pub fn generate_if(&mut self, cond: &Expr, then: &Block, or: &Option<Block>) {
-        let cond = self.generate_expr(cond);
+        let cond = self.generate_expr::<false>(cond);
         let current_block = self.llvm_builder.get_insert_block().unwrap();
         let function = current_block.get_parent().unwrap();
         let then_block = self.context.append_basic_block(function, "if_then");
@@ -649,5 +660,49 @@ impl<'a> CodeGen<'a> {
             .unwrap();
         self.llvm_builder.position_at_end(end_block);
         self.loop_exits.pop();
+    }
+
+    fn generate_field_acces(
+        &mut self,
+        lhs: &Expr,
+        field: &Identifier,
+        ret_ptr: bool,
+    ) -> inkwell::values::BasicValueEnum<'a> {
+        let lhs_unused = self.generate_expr::<false>(lhs);
+        let lhs = self.generate_expr::<true>(lhs);
+        let struct_type = lhs_unused.get_type().into_struct_type();
+        let struct_name = struct_type.get_name().unwrap().to_str().unwrap();
+        let struct_ty = self.struct_types.get(struct_name).unwrap();
+        let (field_ty, field_idx) = struct_ty.fields.get(&field.value).unwrap();
+        let field_ptr = self
+            .llvm_builder
+            .build_struct_gep(struct_type, lhs.into_pointer_value(), *field_idx as u32, "field_access")
+            .unwrap();
+        if ret_ptr {
+            field_ptr.into()
+        } else {
+            self.llvm_builder.build_load(field_ty.to_llvm(self.context), field_ptr, "field_access").unwrap()
+        }
+    }
+
+    fn generate_struct_init(
+        &mut self,
+        name: &Identifier,
+        fields: &Vec<(String, Expr)>,
+    ) -> inkwell::values::BasicValueEnum<'a> {
+        let struct_type = self.context.get_struct_type(&name.value).unwrap();
+        let struct_val = self
+            .llvm_builder
+            .build_alloca(struct_type, "struct")
+            .unwrap();
+        for (i, field) in fields.iter().enumerate() {
+            let field_val = self.generate_expr::<false>(&field.1);
+            let field_ptr = self
+                .llvm_builder
+                .build_struct_gep(struct_type, struct_val, i as u32, "field_set")
+                .unwrap();
+            self.llvm_builder.build_store(field_ptr, field_val);
+        }
+        self.llvm_builder.build_load(struct_type, struct_val, "struct_init").unwrap()
     }
 }

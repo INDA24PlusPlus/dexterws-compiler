@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use crate::{
     chainmap::ChainMap,
     parsing::{
-        self, Assignment, Ast, BinOpKind, Block, Expr, ExprKind, Function, FunctionSignature, Identifier, ItemKind, LiteralKind, NodeSpan, Statement, StatementKind, Struct, Type, UnaryOpKind
+        self, Assignment, Ast, BinOpKind, Block, Expr, ExprKind, Function, FunctionSignature,
+        Identifier, ItemKind, LiteralKind, NodeSpan, Statement, StatementKind, Struct, Type,
+        UnaryOpKind,
     },
     tokenizing::TokenLocation,
 };
@@ -21,10 +23,16 @@ pub struct ExtendedFunction {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ExtendedStruct {
+    pub inner: Struct,
+    pub fields: HashMap<String, (Type, usize)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Module {
     pub name: String,
     pub functions: Vec<ExtendedFunction>,
-    pub structs: HashMap<String, Struct>,
+    pub structs: HashMap<String, ExtendedStruct>,
 }
 
 pub struct SemanticAnalyzer {
@@ -271,11 +279,10 @@ impl SemanticAnalyzer {
             functions: vec![],
             structs: HashMap::new(),
         };
-        
+
         self.declare_builtins();
         self.declare_structs(&ast)?;
         self.declare_functions(&ast)?;
-
 
         for item in ast.nodes {
             match item.kind {
@@ -284,10 +291,13 @@ impl SemanticAnalyzer {
                     module.functions.push(extended_func);
                 }
                 ItemKind::Import(_) => {}
-                ItemKind::Struct(_) => {}
+                ItemKind::Struct(struct_) => {
+                    let name = struct_.name.value.clone();
+                    let extended_struct = self.analyze_struct(struct_)?;
+                    module.structs.insert(name, extended_struct);
+                }
             }
         }
-        module.structs = self.structs.clone();
 
         Ok(module)
     }
@@ -343,8 +353,7 @@ impl SemanticAnalyzer {
                         });
                     }
                     let name = struct_.name.value.clone();
-                    self.structs
-                        .insert(name, struct_.clone());
+                    self.structs.insert(name, struct_.clone());
                 }
                 _ => {}
             }
@@ -376,6 +385,17 @@ impl SemanticAnalyzer {
         extended_func.variables.append(&mut self.function_variables);
 
         Ok(extended_func)
+    }
+
+    fn analyze_struct(&mut self, struct_: Struct) -> SemanticResult<ExtendedStruct> {
+        let mut fields = HashMap::new();
+        for (i, field) in struct_.fields.iter().enumerate() {
+            fields.insert(field.name.value.clone(), (field.ty.clone(), i));
+        }
+        Ok(ExtendedStruct {
+            inner: struct_,
+            fields,
+        })
     }
 
     fn analyze_statement(&mut self, stmt: &Statement) -> SemanticResult<bool> {
@@ -416,15 +436,8 @@ impl SemanticAnalyzer {
 
     fn analyze_assignment(&mut self, assign: &Assignment) -> SemanticResult<()> {
         let expr_result = self.analyze_expr(&assign.value)?;
-        let expected = if let Some(ty) = self.variables.get(&assign.name.value) {
-            ty
-        } else {
-            return Err(SemanticError::VariableNotFound {
-                name: assign.name.clone(),
-                expr: assign.value.clone(),
-            });
-        };
-        if expr_result != *expected {
+        let expected = self.analyze_expr(&assign.assignee)?;
+        if expr_result != expected {
             return Err(SemanticError::ExpressionTypeMismatch {
                 expected: expected.clone(),
                 found: expr_result,
@@ -435,16 +448,19 @@ impl SemanticAnalyzer {
     }
 
     fn analyze_decl(&mut self, decl: &Assignment) -> SemanticResult<()> {
-        if self.variables.contains_key(&decl.name.value) {
+        let ident = match &decl.assignee.kind {
+            ExprKind::Var(ident) => ident,
+            _ => unreachable!("This function should only be called with a variable assignment"),
+        };
+        if self.variables.contains_key(&ident.value) {
             return Err(SemanticError::DoubleVariableDeclaration {
-                name: decl.name.clone(),
-                expr: decl.value.clone(),
+                name: ident.clone(),
+                expr: decl.assignee.clone(),
             });
         }
-        let expr_result = self.analyze_expr(&decl.value)?;
         let var = Variable {
-            name: decl.name.value.clone(),
-            ty: expr_result,
+            name: ident.value.clone(),
+            ty: self.analyze_expr(&decl.value)?,
         };
 
         self.variables.insert(var.name.clone(), var.ty.clone());
@@ -548,6 +564,47 @@ impl SemanticAnalyzer {
                         name: name.clone(),
                         expr: expr.clone(),
                     })
+                }
+            }
+            ExprKind::FieldAccess { lhs, field } => {
+                let lhs_ty = self.analyze_expr(lhs)?;
+                let struct_ = match lhs_ty {
+                    Type::Struct(name) => {
+                        if let Some(struct_) = self.structs.get(&name) {
+                            struct_
+                        } else {
+                            panic!("struct not found")
+                        }
+                    }
+                    _ => panic!("field access on non-struct type"),
+                };
+                if let Some(field) = struct_.fields.iter().find(|f| f.name.value == *field.value) {
+                    Ok(field.ty.clone())
+                } else {
+                    panic!("field not found")
+                }
+            }
+            ExprKind::StructInit { name, fields } => {
+                if let Some(struct_) = self.structs.get(&name.value) {
+                    for (field, expr) in fields {
+                        let field_ty = struct_
+                            .fields
+                            .iter()
+                            .find(|f| f.name.value == *field)
+                            .map(|f| f.ty.clone())
+                            .unwrap();
+                        let expr_ty = self.analyze_expr(expr)?;
+                        if field_ty != expr_ty {
+                            return Err(SemanticError::ExpressionTypeMismatch {
+                                expected: field_ty,
+                                found: expr_ty,
+                                expr: expr.clone(),
+                            });
+                        }
+                    }
+                    Ok(Type::Struct(name.value.clone()))
+                } else {
+                    panic!("struct not found")
                 }
             }
         }
