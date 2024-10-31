@@ -4,7 +4,8 @@ use crate::{
     chainmap::ChainMap,
     parsing::{
         self, Assignment, Ast, BinOpKind, Block, Expr, ExprKind, Function, FunctionSignature,
-        Identifier, ItemKind, LiteralKind, NodeSpan, Statement, StatementKind, Type, UnaryOpKind,
+        Identifier, ItemKind, LiteralKind, NodeSpan, Statement, StatementKind, Struct, Type,
+        UnaryOpKind,
     },
     tokenizing::TokenLocation,
 };
@@ -22,16 +23,23 @@ pub struct ExtendedFunction {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ExtendedStruct {
+    pub inner: Struct,
+    pub fields: HashMap<String, (Type, usize)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Module {
     pub name: String,
     pub functions: Vec<ExtendedFunction>,
-    structs: (),
+    pub structs: HashMap<String, ExtendedStruct>,
 }
 
 pub struct SemanticAnalyzer {
     variables: ChainMap<String, Type>,
     function_variables: Vec<Variable>,
     functions: HashMap<String, FunctionSignature>,
+    structs: HashMap<String, Struct>,
     loop_depth: usize,
     current_function: Option<String>,
 }
@@ -74,6 +82,9 @@ pub enum SemanticError {
     DoubleFunctionDeclaration {
         name: Identifier,
     },
+    DoubleStructDeclaration {
+        name: Identifier,
+    },
     VariableNotFound {
         name: Identifier,
         expr: Expr,
@@ -107,6 +118,7 @@ impl SemanticError {
             SemanticError::BreakOutsideOfLoop { statement } => statement.span,
             SemanticError::DoubleVariableDeclaration { expr, .. } => expr.span,
             SemanticError::DoubleFunctionDeclaration { name } => name.span,
+            SemanticError::DoubleStructDeclaration { name } => name.span,
             SemanticError::VariableNotFound { expr, .. } => expr.span,
             SemanticError::ReturnOutsideOfFunction { stmt } => stmt.span,
             SemanticError::ReturnTypeMismatch { statement, .. } => statement.span,
@@ -148,6 +160,9 @@ impl SemanticError {
             }
             SemanticError::DoubleFunctionDeclaration { name } => {
                 format!("function '{}' already declared", name.value)
+            }
+            SemanticError::DoubleStructDeclaration { name } => {
+                format!("struct '{}' already declared", name.value)
             }
             SemanticError::VariableNotFound { name, .. } => {
                 format!("variable '{}' is not defined", name.value)
@@ -252,6 +267,7 @@ impl SemanticAnalyzer {
             variables: ChainMap::new(),
             function_variables: vec![],
             functions: HashMap::new(),
+            structs: HashMap::new(),
             loop_depth: 0,
             current_function: None,
         }
@@ -261,10 +277,11 @@ impl SemanticAnalyzer {
         let mut module = Module {
             name: name.to_string(),
             functions: vec![],
-            structs: (),
+            structs: HashMap::new(),
         };
 
         self.declare_builtins();
+        self.declare_structs(&ast)?;
         self.declare_functions(&ast)?;
 
         for item in ast.nodes {
@@ -274,6 +291,11 @@ impl SemanticAnalyzer {
                     module.functions.push(extended_func);
                 }
                 ItemKind::Import(_) => {}
+                ItemKind::Struct(struct_) => {
+                    let name = struct_.name.value.clone();
+                    let extended_struct = self.analyze_struct(struct_)?;
+                    module.structs.insert(name, extended_struct);
+                }
             }
         }
 
@@ -296,8 +318,8 @@ impl SemanticAnalyzer {
                         },
                     },
                 },
-                args: vec![("arg".to_string(), *arg_ty)],
-                ret_ty: *ret_ty,
+                args: vec![("arg".to_string(), arg_ty.clone())],
+                ret_ty: ret_ty.clone(),
             };
             self.functions.insert(sig.name.value.clone(), sig);
         }
@@ -315,7 +337,25 @@ impl SemanticAnalyzer {
                     self.functions
                         .insert(func.sig.name.value.clone(), func.sig.clone());
                 }
-                ItemKind::Import(_) => {}
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn declare_structs(&mut self, ast: &Ast) -> SemanticResult<()> {
+        for item in &ast.nodes {
+            match &item.kind {
+                ItemKind::Struct(struct_) => {
+                    if self.structs.contains_key(&struct_.name.value) {
+                        return Err(SemanticError::DoubleStructDeclaration {
+                            name: struct_.name.clone(),
+                        });
+                    }
+                    let name = struct_.name.value.clone();
+                    self.structs.insert(name, struct_.clone());
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -327,7 +367,7 @@ impl SemanticAnalyzer {
         for arg in &func.sig.args {
             let var = Variable {
                 name: arg.0.clone(),
-                ty: arg.1,
+                ty: arg.1.clone(),
             };
             self.variables.insert(var.name.clone(), var.ty).unwrap();
         }
@@ -345,6 +385,17 @@ impl SemanticAnalyzer {
         extended_func.variables.append(&mut self.function_variables);
 
         Ok(extended_func)
+    }
+
+    fn analyze_struct(&mut self, struct_: Struct) -> SemanticResult<ExtendedStruct> {
+        let mut fields = HashMap::new();
+        for (i, field) in struct_.fields.iter().enumerate() {
+            fields.insert(field.name.value.clone(), (field.ty.clone(), i));
+        }
+        Ok(ExtendedStruct {
+            inner: struct_,
+            fields,
+        })
     }
 
     fn analyze_statement(&mut self, stmt: &Statement) -> SemanticResult<bool> {
@@ -385,17 +436,10 @@ impl SemanticAnalyzer {
 
     fn analyze_assignment(&mut self, assign: &Assignment) -> SemanticResult<()> {
         let expr_result = self.analyze_expr(&assign.value)?;
-        let expected = if let Some(ty) = self.variables.get(&assign.name.value) {
-            ty
-        } else {
-            return Err(SemanticError::VariableNotFound {
-                name: assign.name.clone(),
-                expr: assign.value.clone(),
-            });
-        };
-        if expr_result != *expected {
+        let expected = self.analyze_expr(&assign.assignee)?;
+        if expr_result != expected {
             return Err(SemanticError::ExpressionTypeMismatch {
-                expected: *expected,
+                expected: expected.clone(),
                 found: expr_result,
                 expr: assign.value.clone(),
             });
@@ -404,19 +448,22 @@ impl SemanticAnalyzer {
     }
 
     fn analyze_decl(&mut self, decl: &Assignment) -> SemanticResult<()> {
-        if self.variables.contains_key(&decl.name.value) {
+        let ident = match &decl.assignee.kind {
+            ExprKind::Var(ident) => ident,
+            _ => unreachable!("This function should only be called with a variable assignment"),
+        };
+        if self.variables.contains_key(&ident.value) {
             return Err(SemanticError::DoubleVariableDeclaration {
-                name: decl.name.clone(),
-                expr: decl.value.clone(),
+                name: ident.clone(),
+                expr: decl.assignee.clone(),
             });
         }
-        let expr_result = self.analyze_expr(&decl.value)?;
         let var = Variable {
-            name: decl.name.value.clone(),
-            ty: expr_result,
+            name: ident.value.clone(),
+            ty: self.analyze_expr(&decl.value)?,
         };
 
-        self.variables.insert(var.name.clone(), var.ty);
+        self.variables.insert(var.name.clone(), var.ty.clone());
         self.function_variables.push(var);
         Ok(())
     }
@@ -463,7 +510,7 @@ impl SemanticAnalyzer {
         {
             if ret_ty != func.ret_ty {
                 return Err(SemanticError::ReturnTypeMismatch {
-                    expected: func.ret_ty,
+                    expected: func.ret_ty.clone(),
                     found: ret_ty,
                     statement: statement.clone(),
                 });
@@ -486,7 +533,7 @@ impl SemanticAnalyzer {
             },
             ExprKind::Var(var) => {
                 if let Some(var) = self.variables.get(&var.value) {
-                    Ok(*var)
+                    Ok(var.clone())
                 } else {
                     Err(SemanticError::VariableNotFound {
                         name: var.clone(),
@@ -505,18 +552,59 @@ impl SemanticAnalyzer {
                         let arg_ty = self.analyze_expr(arg)?;
                         if arg_ty != expected.1 {
                             return Err(SemanticError::ArgumentTypeMismatch {
-                                expected: expected.1,
+                                expected: expected.1.clone(),
                                 found: arg_ty,
                                 expr: arg.clone(),
                             });
                         }
                     }
-                    Ok(func.ret_ty)
+                    Ok(func.ret_ty.clone())
                 } else {
                     Err(SemanticError::FunctionNotFound {
                         name: name.clone(),
                         expr: expr.clone(),
                     })
+                }
+            }
+            ExprKind::FieldAccess { lhs, field } => {
+                let lhs_ty = self.analyze_expr(lhs)?;
+                let struct_ = match lhs_ty {
+                    Type::Struct(name) => {
+                        if let Some(struct_) = self.structs.get(&name) {
+                            struct_
+                        } else {
+                            panic!("struct not found")
+                        }
+                    }
+                    _ => panic!("field access on non-struct type"),
+                };
+                if let Some(field) = struct_.fields.iter().find(|f| f.name.value == *field.value) {
+                    Ok(field.ty.clone())
+                } else {
+                    panic!("field not found")
+                }
+            }
+            ExprKind::StructInit { name, fields } => {
+                if let Some(struct_) = self.structs.get(&name.value) {
+                    for (field, expr) in fields {
+                        let field_ty = struct_
+                            .fields
+                            .iter()
+                            .find(|f| f.name.value == *field)
+                            .map(|f| f.ty.clone())
+                            .unwrap();
+                        let expr_ty = self.analyze_expr(expr)?;
+                        if field_ty != expr_ty {
+                            return Err(SemanticError::ExpressionTypeMismatch {
+                                expected: field_ty,
+                                found: expr_ty,
+                                expr: expr.clone(),
+                            });
+                        }
+                    }
+                    Ok(Type::Struct(name.value.clone()))
+                } else {
+                    panic!("struct not found")
                 }
             }
         }
@@ -574,7 +662,7 @@ impl SemanticAnalyzer {
         };
         let rhs_ty = self.analyze_expr(rhs)?;
         match kind {
-            UnaryOpKind::Cast(ty) => Ok(*ty),
+            UnaryOpKind::Cast(ty) => Ok(ty.clone()),
             _ => Ok(rhs_ty),
         }
     }

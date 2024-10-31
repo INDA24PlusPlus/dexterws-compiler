@@ -18,6 +18,7 @@ pub enum SymbolKind {
     AssignEq,
     ColonColon,
     Semicolon,
+    Dot,
 
     Equals,
     Neq,
@@ -51,6 +52,7 @@ impl SymbolKind {
             "::" => Some(Self::ColonColon),
             "=" => Some(Self::AssignEq),
             ";" => Some(Self::Semicolon),
+            "." => Some(Self::Dot),
             "==" => Some(Self::Equals),
             "!=" => Some(Self::Neq),
             "<" => Some(Self::Lt),
@@ -235,7 +237,7 @@ impl<'a> Lexer<'a> {
             }
             match c {
                 ':' | '=' | '!' | '<' | '>' | '&' | '|' | '-' => (),
-                '+' | '*' | '/' | '(' | ')' | ';' | '{' | '}' | ',' | '%' | '@' => {
+                '+' | '*' | '/' | '(' | ')' | ';' | '{' | '}' | ',' | '%' | '@' | '.' => {
                     should_break = true;
                 }
                 _ => return true,
