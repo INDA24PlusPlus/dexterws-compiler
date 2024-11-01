@@ -1,6 +1,12 @@
-use std::{collections::HashMap, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
-use crate::{parsing::{self, Ast, ItemKind}, tokenizing};
+use crate::{
+    parsing::{self, Ast, ItemKind},
+    tokenizing,
+};
 
 pub struct Compiler {
     files: HashMap<PathBuf, String>,
@@ -21,10 +27,10 @@ impl Compiler {
             Ok(file) => {
                 let inserted = self.files.insert(path.to_path_buf(), file);
                 if inserted.is_some() {
-                    return Ok(None)
+                    return Ok(None);
                 }
                 self.file_ids.push(path.to_path_buf());
-            },
+            }
             Err(_) => return Err(format!("could not read file: {}", path.to_str().unwrap())),
         }
         let lexer = tokenizing::Lexer::new(self.files.get(path).unwrap());

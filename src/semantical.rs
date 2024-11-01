@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use crate::{
     chainmap::ChainMap,
     parsing::{
-        self, Assignment, Ast, BinOpKind, Block, Expr, ExprKind, Function, FunctionSignature, Identifier, ItemKind, LiteralKind, NodeLocation, Statement, StatementKind, Struct, Type, TypeKind, UnaryOpKind
+        self, Assignment, Ast, BinOpKind, Block, Expr, ExprKind, Function, FunctionSignature,
+        Identifier, ItemKind, LiteralKind, NodeLocation, Statement, StatementKind, Struct, Type,
+        TypeKind, UnaryOpKind,
     },
     tokenizing::TokenLocation,
 };
@@ -375,7 +377,9 @@ impl SemanticAnalyzer {
                 name: arg.name.clone(),
                 ty: arg.ty.kind.clone(),
             };
-            self.variables.insert(var.name.value.clone(), var.ty).unwrap();
+            self.variables
+                .insert(var.name.value.clone(), var.ty)
+                .unwrap();
         }
 
         self.current_function = Some(func.sig.name.value.clone());
@@ -471,7 +475,8 @@ impl SemanticAnalyzer {
             ty: self.analyze_expr(&decl.value)?,
         };
 
-        self.variables.insert(var.name.value.clone(), var.ty.clone());
+        self.variables
+            .insert(var.name.value.clone(), var.ty.clone());
         self.function_variables.push(var);
         Ok(())
     }
@@ -578,7 +583,11 @@ impl SemanticAnalyzer {
                             });
                         }
                     }
-                    Ok(func.ret_ty.as_ref().map(|ty| ty.kind.clone()).unwrap_or(TypeKind::Void))
+                    Ok(func
+                        .ret_ty
+                        .as_ref()
+                        .map(|ty| ty.kind.clone())
+                        .unwrap_or(TypeKind::Void))
                 } else {
                     Err(SemanticError::FunctionNotFound {
                         name: name.clone(),
@@ -648,7 +657,9 @@ impl SemanticAnalyzer {
             });
         }
 
-        if lhs_ty == TypeKind::Float && (binop.kind == BinOpKind::And || binop.kind == BinOpKind::Or) {
+        if lhs_ty == TypeKind::Float
+            && (binop.kind == BinOpKind::And || binop.kind == BinOpKind::Or)
+        {
             return Err(SemanticError::UnsupportedBinOp {
                 ty: TypeKind::Float,
                 expr: expr.clone(),

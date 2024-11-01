@@ -41,7 +41,11 @@ pub struct NodeLocation {
 
 impl NodeLocation {
     pub fn new(file_id: usize, start: TokenLocation, end: TokenLocation) -> Self {
-        Self { file_id, start, end }
+        Self {
+            file_id,
+            start,
+            end,
+        }
     }
     pub fn merge(&self, other: &NodeLocation) -> NodeLocation {
         NodeLocation {
@@ -477,7 +481,10 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         if token.kind == kind {
             Ok(token)
         } else {
-            Err(ParsingError::ExpectedAnotherToken { expected: kind, got: token })
+            Err(ParsingError::ExpectedAnotherToken {
+                expected: kind,
+                got: token,
+            })
         }
     }
 
@@ -486,7 +493,10 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         if token.kind == kind {
             Ok(token)
         } else {
-            Err(ParsingError::ExpectedAnotherToken { expected: kind, got: token.clone() })
+            Err(ParsingError::ExpectedAnotherToken {
+                expected: kind,
+                got: token.clone(),
+            })
         }
     }
 
@@ -592,7 +602,8 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                         }
                         _ => ExprKind::Var(Identifier {
                             value: ident,
-                            span: NodeLocation::new(self.file_id, start, start),                    }),
+                            span: NodeLocation::new(self.file_id, start, start),
+                        }),
                     }
                 }
             }
@@ -630,7 +641,8 @@ impl<I: Iterator<Item = Token>> Parser<I> {
 
         let mut lhs = Expr {
             kind: lhs_kind,
-            span: NodeLocation::new(self.file_id, start, self.get_location()?)       };
+            span: NodeLocation::new(self.file_id, start, self.get_location()?),
+        };
 
         // Left hand recursion
 
@@ -652,10 +664,14 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                             lhs: Box::new(lhs),
                             field: Identifier {
                                 value: identifier,
-                                span: NodeLocation::new(self.file_id, field_token.location, field_token.location),
+                                span: NodeLocation::new(
+                                    self.file_id,
+                                    field_token.location,
+                                    field_token.location,
+                                ),
                             },
                         },
-                        span:  NodeLocation::new(self.file_id, start, self.get_location()?)
+                        span: NodeLocation::new(self.file_id, start, self.get_location()?),
                     };
                     continue;
                 }
@@ -690,7 +706,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         let equals = self.eat()?;
         let start = assignee.span.start;
         let kind = match equals.kind {
-            TokenKind::Symbol(SymbolKind::Walrus)  => {
+            TokenKind::Symbol(SymbolKind::Walrus) => {
                 let value = self.parse_expr(0)?;
                 let span = assignee.span.merge(&value.span);
                 let kind = StatementKind::Decl(Assignment {
@@ -791,9 +807,8 @@ impl<I: Iterator<Item = Token>> Parser<I> {
             _ => {
                 let expr = self.parse_expr(0)?;
                 match self.peek()?.kind {
-                    TokenKind::Symbol(SymbolKind::Equals) | TokenKind::Symbol(SymbolKind::Walrus) => {
-                        self.parse_assignment(expr)
-                    }
+                    TokenKind::Symbol(SymbolKind::Equals)
+                    | TokenKind::Symbol(SymbolKind::Walrus) => self.parse_assignment(expr),
                     _ => {
                         let kind = StatementKind::Expr(expr);
                         Ok(Statement {
@@ -840,11 +855,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         }
         let ty = self.parse_type()?;
         let span = name.span.merge(&ty.span);
-        Ok(Field {
-            name,
-            ty,
-            span,
-        })
+        Ok(Field { name, ty, span })
     }
 
     pub fn parse_fields(&mut self) -> ParsingResult<Fields> {
@@ -883,11 +894,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         let fields = self.parse_fields()?;
         let span = name.span.merge(&fields.span);
 
-        Ok(Struct {
-            name,
-            fields,
-            span,
-        })
+        Ok(Struct { name, fields, span })
     }
 
     pub fn parse_item_kind(&mut self) -> ParsingResult<ItemKind> {
@@ -1058,7 +1065,10 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         }
         let body = self.parse_block()?;
 
-        Ok(Function { sig, body: Some(body) })
+        Ok(Function {
+            sig,
+            body: Some(body),
+        })
     }
 
     pub fn parse_block(&mut self) -> ParsingResult<Block> {

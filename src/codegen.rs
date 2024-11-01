@@ -2,7 +2,8 @@ use std::{collections::HashMap, path::Path, process::Command};
 
 use crate::{
     parsing::{
-        Assignment, BinOp, BinOpKind, Block, Expr, ExprKind, Identifier, LiteralKind, Statement, StatementKind, Type, TypeKind, UnaryOpKind
+        Assignment, BinOp, BinOpKind, Block, Expr, ExprKind, Identifier, LiteralKind, Statement,
+        StatementKind, Type, TypeKind, UnaryOpKind,
     },
     semantical::{ExtendedFunction, ExtendedStruct, Module},
 };
@@ -91,7 +92,6 @@ impl<'a> CodeGen<'a> {
 
         // CC
 
-
         #[cfg(target_os = "windows")]
         let executable_file = Path::new(file_name).with_extension("exe");
         #[cfg(not(target_os = "windows"))]
@@ -111,7 +111,6 @@ impl<'a> CodeGen<'a> {
         };
         #[cfg(not(target_os = "windows"))]
         let cc = "cc";
-
 
         Command::new(cc)
             .arg(object_file)
