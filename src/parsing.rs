@@ -1145,19 +1145,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
     pub fn parse(self) -> ParsingResult<Ast> {
         let mut nodes = Vec::new();
         for item in self {
-            let item = item?;
-            match item.kind {
-                ItemKind::Import(s) => {
-                    let path = std::path::Path::new(&s);
-                    let file = std::fs::read_to_string(path).expect("could not read file");
-                    let lexer = crate::tokenizing::Lexer::new(&file);
-                    let tokens = lexer.collect::<Vec<_>>();
-                    let parser = Parser::new(tokens.into_iter());
-                    let ast = parser.parse()?;
-                    nodes.extend(ast.nodes);
-                }
-                _ => nodes.push(item),
-            }
+            nodes.push(item?);
         }
         Ok(Ast { nodes })
     }
