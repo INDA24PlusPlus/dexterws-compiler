@@ -187,7 +187,7 @@ impl SemanticError {
         let last_line = span.end.line_span.0 - 1;
         let pre_first_line = first_line.checked_sub(1);
         let post_last_line = last_line + 1;
-        let max_line_num_len = post_last_line.to_string().len();
+        let max_line_num_len = (post_last_line + 1).to_string().len();
 
         if let Some(idx) = pre_first_line {
             let line = lines[idx as usize];
@@ -254,6 +254,24 @@ impl SemanticError {
         }
 
         string
+    }
+
+    pub fn file_id(&self) -> usize {
+        match self {
+            SemanticError::ExpressionTypeMismatch { expr, .. } => expr.span.file_id,
+            SemanticError::FunctionNotFound { expr, .. } => expr.span.file_id,
+            SemanticError::ArgumentCountMismatch { expr, .. } => expr.span.file_id,
+            SemanticError::ArgumentTypeMismatch { expr, .. } => expr.span.file_id,
+            SemanticError::BreakOutsideOfLoop { statement } => statement.span.file_id,
+            SemanticError::DoubleVariableDeclaration { expr, .. } => expr.span.file_id,
+            SemanticError::DoubleFunctionDeclaration { name } => name.span.file_id,
+            SemanticError::DoubleStructDeclaration { name } => name.span.file_id,
+            SemanticError::VariableNotFound { name, .. } => name.span.file_id,
+            SemanticError::ReturnOutsideOfFunction { stmt } => stmt.span.file_id,
+            SemanticError::ReturnTypeMismatch { statement, .. } => statement.span.file_id,
+            SemanticError::UnsupportedBinOp { expr, .. } => expr.span.file_id,
+            SemanticError::UnreachableCode { statement } => statement.span.file_id,
+        }
     }
 }
 

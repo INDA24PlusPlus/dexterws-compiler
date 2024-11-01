@@ -667,7 +667,6 @@ impl<'a> CodeGen<'a> {
         if let Some(or) = or {
             let or_block = self.context.append_basic_block(function, "if_or");
             let exited_early = self.generate_block(or, or_block);
-            println!("exited_early: {}", exited_early);
             if !exited_early {
                 self.llvm_builder
                     .build_unconditional_branch(end_block)
