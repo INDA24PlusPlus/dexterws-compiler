@@ -37,6 +37,7 @@ pub enum SymbolKind {
     Comma,
     RArrow,
     Colon,
+    Ellipsis,
 }
 
 impl SymbolKind {
@@ -69,6 +70,7 @@ impl SymbolKind {
             "," => Some(Self::Comma),
             "->" => Some(Self::RArrow),
             ":" => Some(Self::Colon),
+            "..." => Some(Self::Ellipsis),
             _ => None,
         }
     }
@@ -97,6 +99,13 @@ pub enum TokenKind {
 pub struct TokenLocation {
     pub line_span: (u32, u32),
     pub col_span: (u32, u32),
+}
+
+impl TokenLocation {
+    pub const NULL: Self = Self {
+        line_span: (0, 0),
+        col_span: (0, 0),
+    };
 }
 
 #[derive(Debug, Clone)]
@@ -232,12 +241,12 @@ impl<'a> Lexer<'a> {
             if should_break {
                 return true;
             }
-            if count > 2 {
+            if count > 3 {
                 return true;
             }
             match c {
-                ':' | '=' | '!' | '<' | '>' | '&' | '|' | '-' => (),
-                '+' | '*' | '/' | '(' | ')' | ';' | '{' | '}' | ',' | '%' | '@' | '.' => {
+                ':' | '=' | '!' | '<' | '>' | '&' | '|' | '-' | '.' => (),
+                '+' | '*' | '/' | '(' | ')' | ';' | '{' | '}' | ',' | '%' | '@' => {
                     should_break = true;
                 }
                 _ => return true,
