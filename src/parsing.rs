@@ -940,17 +940,6 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         Ok(Item { kind })
     }
 
-    pub fn parse_local_name(&mut self) -> ParsingResult<Identifier> {
-        let token = self.eat()?;
-        match token.kind {
-            TokenKind::Ident(s) => Ok(Identifier {
-                value: s,
-                span: NodeLocation::new(self.file_id, token.location, token.location),
-            }),
-            _ => Err(ParsingError::UnexpectedToken(token)),
-        }
-    }
-
     pub fn parse_identifier(&mut self) -> ParsingResult<Identifier> {
         let token = self.eat()?;
         match token.kind {

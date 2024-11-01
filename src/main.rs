@@ -1,5 +1,3 @@
-use std::path;
-
 use dexterws_compiler::compiler;
 
 fn main() {
