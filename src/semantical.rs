@@ -3,9 +3,7 @@ use std::collections::HashMap;
 use crate::{
     chainmap::ChainMap,
     parsing::{
-        self, Assignment, Ast, BinOpKind, Block, Expr, ExprKind, Function, FunctionSignature,
-        Identifier, ItemKind, LiteralKind, NodeLocation, Statement, StatementKind, Struct, Type,
-        TypeKind, UnaryOpKind,
+        self, Arg, Args, Assignment, Ast, BinOpKind, Block, CallArgs, Expr, ExprKind, Function, FunctionSignature, Identifier, ItemKind, LiteralKind, NodeLocation, Statement, StatementKind, Struct, Type, TypeKind, UnaryOpKind
     },
     tokenizing::TokenLocation,
 };
@@ -59,35 +57,32 @@ pub enum SemanticError {
         expr: Expr,
     },
     FunctionNotFound {
-        name: String,
-        expr: Expr,
+        ident: Identifier,
     },
     ArgumentCountMismatch {
         expected: usize,
         found: usize,
-        expr: Expr,
+        args: CallArgs,
     },
     ArgumentTypeMismatch {
         expected: TypeKind,
         found: TypeKind,
-        expr: Expr,
+        arg: Expr,
     },
     BreakOutsideOfLoop {
         statement: Statement,
     },
     DoubleVariableDeclaration {
-        name: Identifier,
-        expr: Expr,
+        ident: Identifier,
     },
     DoubleFunctionDeclaration {
-        name: Identifier,
+        ident: Identifier,
     },
     DoubleStructDeclaration {
-        name: Identifier,
+        ident: Identifier,
     },
     VariableNotFound {
-        name: Identifier,
-        expr: Expr,
+        ident: Identifier,
     },
     ReturnOutsideOfFunction {
         stmt: Statement,
@@ -112,14 +107,14 @@ impl SemanticError {
         let lines = source.lines().collect::<Vec<_>>();
         let span = match &self {
             SemanticError::ExpressionTypeMismatch { expr, .. } => expr.span,
-            SemanticError::FunctionNotFound { expr, .. } => expr.span,
-            SemanticError::ArgumentCountMismatch { expr, .. } => expr.span,
-            SemanticError::ArgumentTypeMismatch { expr, .. } => expr.span,
+            SemanticError::FunctionNotFound { ident, .. } => ident.span,
+            SemanticError::ArgumentCountMismatch { args, .. } => args.span,
+            SemanticError::ArgumentTypeMismatch { arg, .. } => arg.span,
             SemanticError::BreakOutsideOfLoop { statement } => statement.span,
-            SemanticError::DoubleVariableDeclaration { expr, .. } => expr.span,
-            SemanticError::DoubleFunctionDeclaration { name } => name.span,
-            SemanticError::DoubleStructDeclaration { name } => name.span,
-            SemanticError::VariableNotFound { expr, .. } => expr.span,
+            SemanticError::DoubleVariableDeclaration { ident, .. } => ident.span,
+            SemanticError::DoubleFunctionDeclaration { ident } => ident.span,
+            SemanticError::DoubleStructDeclaration { ident } => ident.span,
+            SemanticError::VariableNotFound { ident } => ident.span,
             SemanticError::ReturnOutsideOfFunction { stmt } => stmt.span,
             SemanticError::ReturnTypeMismatch { statement, .. } => statement.span,
             SemanticError::UnsupportedBinOp { expr, .. } => expr.span,
@@ -135,8 +130,8 @@ impl SemanticError {
                     expected, found
                 )
             }
-            SemanticError::FunctionNotFound { name, .. } => {
-                format!("function '{}' is not defined", name)
+            SemanticError::FunctionNotFound { ident, .. } => {
+                format!("function '{}' is not defined", ident.value)
             }
             SemanticError::ArgumentCountMismatch {
                 expected, found, ..
@@ -155,17 +150,17 @@ impl SemanticError {
                 )
             }
             SemanticError::BreakOutsideOfLoop { .. } => "cannot break outside of loop".to_string(),
-            SemanticError::DoubleVariableDeclaration { name, .. } => {
-                format!("variable '{}' already declared", name.value)
+            SemanticError::DoubleVariableDeclaration { ident } => {
+                format!("variable '{}' already declared", ident.value)
             }
-            SemanticError::DoubleFunctionDeclaration { name } => {
-                format!("function '{}' already declared", name.value)
+            SemanticError::DoubleFunctionDeclaration { ident } => {
+                format!("function '{}' already declared", ident.value)
             }
-            SemanticError::DoubleStructDeclaration { name } => {
-                format!("struct '{}' already declared", name.value)
+            SemanticError::DoubleStructDeclaration { ident } => {
+                format!("struct '{}' already declared", ident.value)
             }
-            SemanticError::VariableNotFound { name, .. } => {
-                format!("variable '{}' is not defined", name.value)
+            SemanticError::VariableNotFound { ident } => {
+                format!("variable '{}' is not defined", ident.value)
             }
             SemanticError::ReturnOutsideOfFunction { .. } => {
                 "cannot return outside of function".to_string()
@@ -260,20 +255,20 @@ impl SemanticError {
 
     pub fn file_id(&self) -> usize {
         match self {
-            SemanticError::ExpressionTypeMismatch { expr, .. } => expr.span.file_id,
-            SemanticError::FunctionNotFound { expr, .. } => expr.span.file_id,
-            SemanticError::ArgumentCountMismatch { expr, .. } => expr.span.file_id,
-            SemanticError::ArgumentTypeMismatch { expr, .. } => expr.span.file_id,
-            SemanticError::BreakOutsideOfLoop { statement } => statement.span.file_id,
-            SemanticError::DoubleVariableDeclaration { expr, .. } => expr.span.file_id,
-            SemanticError::DoubleFunctionDeclaration { name } => name.span.file_id,
-            SemanticError::DoubleStructDeclaration { name } => name.span.file_id,
-            SemanticError::VariableNotFound { name, .. } => name.span.file_id,
-            SemanticError::ReturnOutsideOfFunction { stmt } => stmt.span.file_id,
-            SemanticError::ReturnTypeMismatch { statement, .. } => statement.span.file_id,
-            SemanticError::UnsupportedBinOp { expr, .. } => expr.span.file_id,
-            SemanticError::UnreachableCode { statement } => statement.span.file_id,
-        }
+            SemanticError::ExpressionTypeMismatch { expr, .. } => expr.span,
+            SemanticError::FunctionNotFound { ident } => ident.span,
+            SemanticError::ArgumentCountMismatch { args, .. } => args.span,
+            SemanticError::ArgumentTypeMismatch { arg, .. } => arg.span,
+            SemanticError::BreakOutsideOfLoop { statement } => statement.span,
+            SemanticError::DoubleVariableDeclaration { ident } => ident.span,
+            SemanticError::DoubleFunctionDeclaration { ident } => ident.span,
+            SemanticError::DoubleStructDeclaration { ident } => ident.span,
+            SemanticError::VariableNotFound { ident } => ident.span,
+            SemanticError::ReturnOutsideOfFunction { stmt } => stmt.span,
+            SemanticError::ReturnTypeMismatch { statement, .. } => statement.span,
+            SemanticError::UnsupportedBinOp { expr, .. } => expr.span,
+            SemanticError::UnreachableCode { statement } => statement.span,
+        }.start.file_id()
     }
 }
 
@@ -339,7 +334,7 @@ impl SemanticAnalyzer {
                 ItemKind::Function(func) => {
                     if self.functions.contains_key(&func.sig.name.value) {
                         return Err(SemanticError::DoubleFunctionDeclaration {
-                            name: func.sig.name.clone(),
+                            ident: func.sig.name.clone(),
                         });
                     }
                     self.functions
@@ -357,7 +352,7 @@ impl SemanticAnalyzer {
                 ItemKind::Struct(struct_) => {
                     if self.structs.contains_key(&struct_.name.value) {
                         return Err(SemanticError::DoubleStructDeclaration {
-                            name: struct_.name.clone(),
+                            ident: struct_.name.clone(),
                         });
                     }
                     let name = struct_.name.value.clone();
@@ -466,8 +461,7 @@ impl SemanticAnalyzer {
         };
         if self.variables.contains_key(&ident.value) {
             return Err(SemanticError::DoubleVariableDeclaration {
-                name: ident.clone(),
-                expr: decl.assignee.clone(),
+                ident: ident.clone(),
             });
         }
         let var = Variable {
@@ -557,29 +551,29 @@ impl SemanticAnalyzer {
                     Ok(var.clone())
                 } else {
                     Err(SemanticError::VariableNotFound {
-                        name: var.clone(),
-                        expr: expr.clone(),
+                        ident: var.clone(),
                     })
                 }
             }
             ExprKind::BinOp(_) => self.analyze_binop(expr),
             ExprKind::UnaryOp { .. } => self.analyze_unaryop(expr),
             ExprKind::Call { name, args } => {
-                if let Some(func) = self.functions.get(name) {
+                if let Some(func) = self.functions.get(&name.value) {
                     if func.args.len() != args.len() && !func.args.variadic {
                         return Err(SemanticError::ArgumentCountMismatch {
                             expected: func.args.len(),
                             found: args.len(),
-                            expr: expr.clone(),
+                            args: args.clone(),
                         });
                     }
+                    let diff = args.len() - func.args.len();
                     for (arg, expected) in args.iter().zip(func.args.iter()) {
                         let arg_ty = self.analyze_expr(arg)?;
                         if arg_ty != expected.ty.kind {
                             return Err(SemanticError::ArgumentTypeMismatch {
                                 expected: expected.ty.kind.clone(),
                                 found: arg_ty,
-                                expr: arg.clone(),
+                                arg: arg.clone(),
                             });
                         }
                     }
@@ -590,8 +584,7 @@ impl SemanticAnalyzer {
                         .unwrap_or(TypeKind::Void))
                 } else {
                     Err(SemanticError::FunctionNotFound {
-                        name: name.clone(),
-                        expr: expr.clone(),
+                        ident: name.clone(),
                     })
                 }
             }

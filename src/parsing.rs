@@ -34,31 +34,23 @@ use crate::tokenizing::{
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct NodeLocation {
-    pub file_id: usize,
     pub start: TokenLocation,
     pub end: TokenLocation,
 }
 
 impl NodeLocation {
-    pub fn new(file_id: usize, start: TokenLocation, end: TokenLocation) -> Self {
+    pub fn new(start: TokenLocation, end: TokenLocation) -> Self {
         Self {
-            file_id,
             start,
             end,
         }
     }
     pub fn merge(&self, other: &NodeLocation) -> NodeLocation {
         NodeLocation {
-            file_id: self.file_id,
             start: self.start,
             end: other.end,
         }
     }
-    pub const NULL: NodeLocation = NodeLocation {
-        file_id: usize::MAX,
-        start: TokenLocation::NULL,
-        end: TokenLocation::NULL,
-    };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,6 +297,20 @@ pub enum LiteralKind {
 }
 
 #[derive(Debug, Clone)]
+pub struct CallArgs {
+    pub args: Vec<Expr>,
+    pub span: NodeLocation,
+}
+
+impl Deref for CallArgs {
+    type Target = Vec<Expr>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.args
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum ExprKind {
     Literal(LiteralKind),
     Var(Identifier),
@@ -314,8 +320,8 @@ pub enum ExprKind {
         rhs: Box<Expr>,
     },
     Call {
-        name: String,
-        args: Vec<Expr>,
+        name: Identifier,
+        args: CallArgs,
     },
     FieldAccess {
         lhs: Box<Expr>,
@@ -443,6 +449,14 @@ impl ParsingError {
 
         string
     }
+
+    pub fn file_id(&self) -> usize {
+        match self {
+            ParsingError::UnexpectedToken(token) => token.location.file_id,
+            ParsingError::ExpectedAnotherToken { got, .. } => got.location.file_id,
+            ParsingError::UnexpectedEndOfInput => 0,
+        }
+    }
 }
 
 pub type ParsingResult<T> = Result<T, ParsingError>;
@@ -539,13 +553,12 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                 } else {
                     match self.peek()?.kind {
                         TokenKind::Symbol(SymbolKind::LParen) => {
-                            let _ = self.eat()?;
+                            let lparen = self.eat()?;
                             let mut args = Vec::new();
                             loop {
                                 let token = self.peek()?;
                                 match token.kind {
                                     TokenKind::Symbol(SymbolKind::RParen) => {
-                                        let _ = self.eat()?;
                                         break;
                                     }
                                     TokenKind::Symbol(SymbolKind::Comma) => {
@@ -557,7 +570,23 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                                     }
                                 }
                             }
-                            ExprKind::Call { name: ident, args }
+                            let rparen = self.eat()?;
+                            ExprKind::Call {
+                                name: Identifier {
+                                    value: ident,
+                                    span: NodeLocation::new(
+                                        lhs_token.location,
+                                        lhs_token.location,
+                                    ),
+                                },
+                                args: CallArgs {
+                                    args,
+                                    span: NodeLocation::new(
+                                        lparen.location,
+                                        rparen.location,
+                                    ),
+                                },
+                            }
                         }
                         TokenKind::Symbol(SymbolKind::LBrace) => {
                             let _ = self.eat()?;
@@ -595,14 +624,14 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                             ExprKind::StructInit {
                                 name: Identifier {
                                     value: ident,
-                                    span: NodeLocation::new(self.file_id, start, start),
+                                    span: NodeLocation::new(start, start),
                                 },
                                 fields,
                             }
                         }
                         _ => ExprKind::Var(Identifier {
                             value: ident,
-                            span: NodeLocation::new(self.file_id, start, start),
+                            span: NodeLocation::new(start, start),
                         }),
                     }
                 }
@@ -641,7 +670,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
 
         let mut lhs = Expr {
             kind: lhs_kind,
-            span: NodeLocation::new(self.file_id, start, self.get_location()?),
+            span: NodeLocation::new(start, self.get_location()?),
         };
 
         // Left hand recursion
@@ -665,13 +694,12 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                             field: Identifier {
                                 value: identifier,
                                 span: NodeLocation::new(
-                                    self.file_id,
                                     field_token.location,
                                     field_token.location,
                                 ),
                             },
                         },
-                        span: NodeLocation::new(self.file_id, start, self.get_location()?),
+                        span: NodeLocation::new(start, self.get_location()?),
                     };
                     continue;
                 }
@@ -695,7 +723,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                     lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
                 }),
-                span: NodeLocation::new(self.file_id, start, self.get_location()?),
+                span: NodeLocation::new(start, self.get_location()?),
             };
         }
 
@@ -709,28 +737,26 @@ impl<I: Iterator<Item = Token>> Parser<I> {
             TokenKind::Symbol(SymbolKind::Walrus) => {
                 let value = self.parse_expr(0)?;
                 let span = assignee.span.merge(&value.span);
-                let kind = StatementKind::Decl(Assignment {
+                StatementKind::Decl(Assignment {
                     assignee,
                     value,
                     span,
-                });
-                kind
+                })
             }
-            TokenKind::Symbol(SymbolKind::Equals) => {
+            TokenKind::Symbol(SymbolKind::AssignEq) => {
                 let value = self.parse_expr(0)?;
                 let span = assignee.span.merge(&value.span);
-                let kind = StatementKind::Assign(Assignment {
+                StatementKind::Assign(Assignment {
                     assignee,
                     value,
                     span,
-                });
-                kind
+                })
             }
             _ => return Err(ParsingError::UnexpectedToken(equals)),
         };
         Ok(Statement {
             kind,
-            span: NodeLocation::new(self.file_id, start, self.get_location()?),
+            span: NodeLocation::new(start, self.get_location()?),
         })
     }
 
@@ -766,7 +792,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                 };
                 Ok(Statement {
                     kind,
-                    span: NodeLocation::new(self.file_id, start, self.get_location()?),
+                    span: NodeLocation::new(start, self.get_location()?),
                 })
             }
             "loop" => {
@@ -775,14 +801,14 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                 let kind = StatementKind::Loop { body };
                 Ok(Statement {
                     kind,
-                    span: NodeLocation::new(self.file_id, start, self.get_location()?),
+                    span: NodeLocation::new(start, self.get_location()?),
                 })
             }
             "break" => {
                 let _ = self.eat()?;
                 Ok(Statement {
                     kind: StatementKind::Break,
-                    span: NodeLocation::new(self.file_id, start, self.get_location()?),
+                    span: NodeLocation::new(start, self.get_location()?),
                 })
             }
             "return" => {
@@ -801,19 +827,19 @@ impl<I: Iterator<Item = Token>> Parser<I> {
                 let kind = StatementKind::Return(value.map(Box::new));
                 Ok(Statement {
                     kind,
-                    span: NodeLocation::new(self.file_id, start, self.get_location()?),
+                    span: NodeLocation::new(start, self.get_location()?),
                 })
             }
             _ => {
                 let expr = self.parse_expr(0)?;
                 match self.peek()?.kind {
-                    TokenKind::Symbol(SymbolKind::Equals)
+                    TokenKind::Symbol(SymbolKind::AssignEq)
                     | TokenKind::Symbol(SymbolKind::Walrus) => self.parse_assignment(expr),
                     _ => {
                         let kind = StatementKind::Expr(expr);
                         Ok(Statement {
                             kind,
-                            span: NodeLocation::new(self.file_id, start, self.get_location()?),
+                            span: NodeLocation::new(start, self.get_location()?),
                         })
                     }
                 }
@@ -835,7 +861,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         };
         Ok(Type {
             kind,
-            span: NodeLocation::new(self.file_id, token.location, token.location),
+            span: NodeLocation::new(token.location, token.location),
         })
     }
 
@@ -844,7 +870,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         let name = match name.kind {
             TokenKind::Ident(s) => Identifier {
                 value: s,
-                span: NodeLocation::new(self.file_id, name.location, name.location),
+                span: NodeLocation::new(name.location, name.location),
             },
             _ => return Err(ParsingError::UnexpectedToken(name)),
         };
@@ -876,7 +902,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         let rbrace = self.eat()?;
         Ok(Fields {
             fields,
-            span: NodeLocation::new(self.file_id, lbrace.location, rbrace.location),
+            span: NodeLocation::new(lbrace.location, rbrace.location),
         })
     }
 
@@ -885,7 +911,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         let name = match name.kind {
             TokenKind::Ident(s) => Identifier {
                 value: s,
-                span: NodeLocation::new(self.file_id, name.location, name.location),
+                span: NodeLocation::new(name.location, name.location),
             },
             _ => return Err(ParsingError::UnexpectedToken(name)),
         };
@@ -945,7 +971,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         match token.kind {
             TokenKind::Ident(s) => Ok(Identifier {
                 value: s,
-                span: NodeLocation::new(self.file_id, token.location, token.location),
+                span: NodeLocation::new(token.location, token.location),
             }),
             _ => Err(ParsingError::UnexpectedToken(token)),
         }
@@ -997,7 +1023,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         Ok(Args {
             args,
             variadic,
-            span: NodeLocation::new(self.file_id, lparen.location, self.get_location()?),
+            span: NodeLocation::new(lparen.location, self.get_location()?),
         })
     }
 
@@ -1006,7 +1032,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         match token.kind {
             TokenKind::Ident(s) => Ok(Identifier {
                 value: s,
-                span: NodeLocation::new(self.file_id, token.location, token.location),
+                span: NodeLocation::new(token.location, token.location),
             }),
             _ => Err(ParsingError::UnexpectedToken(token)),
         }
@@ -1030,7 +1056,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         };
         Ok(Some(Type {
             kind,
-            span: NodeLocation::new(self.file_id, token.location, token.location),
+            span: NodeLocation::new(token.location, token.location),
         }))
     }
 
@@ -1077,7 +1103,7 @@ impl<I: Iterator<Item = Token>> Parser<I> {
         let rbrace = self.eat_and_assert(TokenKind::Symbol(SymbolKind::RBrace))?;
         Ok(Block {
             stmts,
-            span: NodeLocation::new(self.file_id, lbrace.location, rbrace.location),
+            span: NodeLocation::new(lbrace.location, rbrace.location),
         })
     }
 

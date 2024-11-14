@@ -1,6 +1,7 @@
 use std::{iter::Peekable, str::Chars};
 
 pub struct Lexer<'a> {
+    file_id: usize,
     data: Peekable<Chars<'a>>,
     line: u32,
     column: u32,
@@ -97,15 +98,23 @@ pub enum TokenKind {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct TokenLocation {
+    pub file_id: usize,
     pub line_span: (u32, u32),
     pub col_span: (u32, u32),
 }
 
 impl TokenLocation {
-    pub const NULL: Self = Self {
-        line_span: (0, 0),
-        col_span: (0, 0),
-    };
+    pub fn new(file_id: usize, line_span: (u32, u32), col_span: (u32, u32)) -> Self {
+        Self {
+            file_id,
+            line_span,
+            col_span,
+        }
+    }
+
+    pub fn file_id(&self) -> usize {
+        self.file_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -115,8 +124,9 @@ pub struct Token {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(input: &'a str, file_id: usize) -> Self {
         Self {
+            file_id,
             data: input.chars().peekable(),
             line: 1,
             column: 1,
@@ -155,10 +165,7 @@ impl<'a> Lexer<'a> {
         let end = (self.line, self.column);
         (
             value,
-            TokenLocation {
-                line_span: (start.0, end.0),
-                col_span: (start.1, end.1),
-            },
+            TokenLocation::new(self.file_id, start, end),
         )
     }
 

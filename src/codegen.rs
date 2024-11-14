@@ -1,9 +1,9 @@
-use std::{collections::HashMap, path::Path, process::Command};
+use std::{collections::HashMap, path::{Path, PathBuf}, process::Command};
 
 use crate::{
     parsing::{
         Assignment, BinOp, BinOpKind, Block, Expr, ExprKind, Identifier, LiteralKind, Statement,
-        StatementKind, Type, TypeKind, UnaryOpKind,
+        StatementKind, TypeKind, UnaryOpKind,
     },
     semantical::{ExtendedFunction, ExtendedStruct, Module},
 };
@@ -54,16 +54,11 @@ impl<'a> CodeGen<'a> {
         }
     }
 
-    pub fn spit_out(&self) {
-        self.llvm_module.print_to_stderr();
+    pub fn verify(&self) -> Result<(), String> {
+        self.llvm_module.verify().map_err(|e| e.to_string())
     }
 
-    pub fn verify(&self) {
-        let verify = self.llvm_module.verify();
-        println!("{:?}", verify);
-    }
-
-    pub fn create_binary(&self, file_name: &str) {
+    pub fn create_binary(&self, file_name: &str) -> Option<PathBuf> {
         Target::initialize_all(&Default::default());
         let target_triple = TargetMachine::get_default_triple();
         let target = Target::from_triple(&target_triple).unwrap();
@@ -112,12 +107,15 @@ impl<'a> CodeGen<'a> {
         #[cfg(not(target_os = "windows"))]
         let cc = "cc";
 
-        Command::new(cc)
+        let res = Command::new(cc)
             .arg(object_file)
             .arg("-o")
-            .arg(executable_file)
-            .status()
-            .unwrap();
+            .arg(&executable_file)
+            .status();
+        if res.is_err() {
+            return None;
+        }
+        Some(executable_file)
     }
 
     pub fn declare_functions(&mut self, module: &Module) {
@@ -161,7 +159,7 @@ impl<'a> CodeGen<'a> {
             }
             struct_type.set_body(&members, false);
         }
-        self.struct_types = module.structs.clone();
+        self.struct_types.clone_from(&module.structs);
     }
 
     pub fn generate(&mut self, module: Module) {
@@ -170,93 +168,6 @@ impl<'a> CodeGen<'a> {
         for function in module.functions.iter() {
             self.generate_function(function);
         }
-    }
-
-    pub fn generate_printf(&mut self) {
-        let string_type = self.context.ptr_type(AddressSpace::default());
-        let function_type = self.context.i64_type().fn_type(&[string_type.into()], true);
-        let _printf = self.llvm_module.add_function("printf", function_type, None);
-    }
-
-    pub fn generate_iprint(&mut self) {
-        let printf = self.llvm_module.get_function("printf").unwrap();
-        let int_type = TypeKind::Int.to_llvm(self.context);
-        let iprint_type = self.context.i64_type().fn_type(&[int_type.into()], false);
-        let iprint = self.llvm_module.add_function("iprint", iprint_type, None);
-        let basic_block = self.context.append_basic_block(iprint, "entry");
-        self.llvm_builder.position_at_end(basic_block);
-        let fmt = self
-            .llvm_builder
-            .build_global_string_ptr("%lld\n", "fmt_iprint")
-            .unwrap();
-        let arg = iprint.get_first_param().unwrap();
-        let call = self
-            .llvm_builder
-            .build_call(printf, &[fmt.as_pointer_value().into(), arg.into()], "call")
-            .unwrap();
-        let call_value = call.try_as_basic_value().left().unwrap();
-        self.llvm_builder.build_return(Some(&call_value)).unwrap();
-    }
-
-    pub fn generate_fprint(&mut self) {
-        let printf = self.llvm_module.get_function("printf").unwrap();
-        let float_type = TypeKind::Float.to_llvm(self.context);
-        let fprint_type = self.context.i64_type().fn_type(&[float_type.into()], false);
-        let fprint = self.llvm_module.add_function("fprint", fprint_type, None);
-        let basic_block = self.context.append_basic_block(fprint, "entry");
-        self.llvm_builder.position_at_end(basic_block);
-        let fmt = self
-            .llvm_builder
-            .build_global_string_ptr("%lf\n", "fmt_fprint")
-            .unwrap();
-        let arg = fprint.get_first_param().unwrap();
-        let call = self
-            .llvm_builder
-            .build_call(printf, &[fmt.as_pointer_value().into(), arg.into()], "call")
-            .unwrap();
-        let call_value = call.try_as_basic_value().left().unwrap();
-        self.llvm_builder.build_return(Some(&call_value)).unwrap();
-    }
-
-    pub fn generate_bprint(&mut self) {
-        let printf = self.llvm_module.get_function("printf").unwrap();
-        let bool_type = TypeKind::Bool.to_llvm(self.context);
-        let bprint_type = self.context.i64_type().fn_type(&[bool_type.into()], false);
-        let bprint = self.llvm_module.add_function("bprint", bprint_type, None);
-        let basic_block = self.context.append_basic_block(bprint, "entry");
-        self.llvm_builder.position_at_end(basic_block);
-        let fmt = self
-            .llvm_builder
-            .build_global_string_ptr("%s\n", "fmt_bprint")
-            .unwrap();
-        let arg = bprint.get_first_param().unwrap();
-        let true_str = self
-            .llvm_builder
-            .build_global_string_ptr("true", "true")
-            .unwrap();
-        let false_str = self
-            .llvm_builder
-            .build_global_string_ptr("false", "false")
-            .unwrap();
-        let call = self
-            .llvm_builder
-            .build_select(
-                arg.into_int_value(),
-                true_str.as_pointer_value(),
-                false_str.as_pointer_value(),
-                "select",
-            )
-            .unwrap();
-        let call = self
-            .llvm_builder
-            .build_call(
-                printf,
-                &[fmt.as_pointer_value().into(), call.into()],
-                "call",
-            )
-            .unwrap();
-        let call_value = call.try_as_basic_value().left().unwrap();
-        self.llvm_builder.build_return(Some(&call_value)).unwrap();
     }
 
     pub fn generate_function(&mut self, function: &ExtendedFunction) {
